@@ -263,3 +263,65 @@ export async function createAlert(req, res) {
     res.status(500).json({ error: 'Failed to create alert' });
   }
 }
+
+export async function deleteAlert(req, res) {
+  const { id } = req.params;
+
+  try {
+    let targetNodeId = null;
+
+    if (isPostgresConnected && pool) {
+      // Get the alert first so we know the node
+      const alertRes = await pool.query('SELECT * FROM alerts WHERE id = $1', [id]);
+      if (alertRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Alert not found' });
+      }
+
+      targetNodeId = alertRes.rows[0].node_id;
+
+      // Delete the alert
+      await pool.query('DELETE FROM alerts WHERE id = $1', [id]);
+
+      // Check if this node has any other active alerts remaining
+      const activeCount = await pool.query(
+        `SELECT COUNT(*) FROM alerts WHERE node_id = $1 AND state = 'active'`,
+        [targetNodeId]
+      );
+
+      if (parseInt(activeCount.rows[0].count, 10) === 0) {
+        await pool.query(
+          `UPDATE nodes SET status = 'normal' WHERE id = $1`,
+          [targetNodeId]
+        );
+        broadcastNodeStatus({ id: targetNodeId, status: 'normal' });
+      }
+    } else {
+      const alertIndex = inMemoryStore.alerts.findIndex(a => a.id === id);
+      if (alertIndex === -1) {
+        return res.status(404).json({ error: 'Alert not found' });
+      }
+
+      targetNodeId = inMemoryStore.alerts[alertIndex].node_id;
+      inMemoryStore.alerts.splice(alertIndex, 1);
+
+      const hasOtherActive = inMemoryStore.alerts.some(
+        a => a.node_id === targetNodeId && a.state === 'active'
+      );
+      if (!hasOtherActive) {
+        const node = inMemoryStore.nodes.find(n => n.id === targetNodeId);
+        if (node) {
+          node.status = 'normal';
+          broadcastNodeStatus({ id: targetNodeId, status: 'normal' });
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: 'Alert deleted successfully',
+    });
+  } catch (err) {
+    console.error('Error deleting alert:', err);
+    res.status(500).json({ error: 'Failed to delete alert' });
+  }
+}

@@ -10,6 +10,7 @@ import {
   Cpu,
   ShieldCheck,
   AlertTriangle,
+  Trash2,
 } from "lucide-react";
 
 function App() {
@@ -288,6 +289,50 @@ function App() {
     }
   }
 
+  /* =======================================================
+     DELETE ALERT
+     ======================================================= */
+  async function deleteAlert(id) {
+    const API_BASE = import.meta.env.VITE_API_URL || "";
+
+    // If the deleted alert is currently selected, close the details panel
+    if (selectedAlert?.id === id) {
+      setSelectedAlert(null);
+    }
+
+    // Optimistic UI update — remove alert from state
+    const deletedAlert = alerts.find((a) => a.id === id);
+    setAlerts((currentAlerts) => {
+      const updated = currentAlerts.filter((alert) => alert.id !== id);
+      try { localStorage.setItem("cached_alerts", JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+
+    // If the deleted alert was active and no other active alerts remain for that node, reset node
+    if (deletedAlert && deletedAlert.state === "active") {
+      setNodes((currentNodes) => {
+        const otherActive = alerts.some(
+          (a) => a.id !== id && a.node === deletedAlert.node && a.state === "active"
+        );
+        if (!otherActive) {
+          return currentNodes.map((n) =>
+            n.id === deletedAlert.node ? { ...n, status: "normal" } : n
+          );
+        }
+        return currentNodes;
+      });
+    }
+
+    // Sync with backend
+    if (API_BASE) {
+      try {
+        await fetch(`${API_BASE}/api/alerts/${id}`, { method: "DELETE" });
+      } catch (err) {
+        console.warn("Could not sync deletion with backend:", err);
+      }
+    }
+  }
+
   return (
     <div className="app">
 
@@ -429,6 +474,7 @@ function App() {
               selectedAlert={selectedAlert}
               setSelectedAlert={setSelectedAlert}
               resolveAlert={resolveAlert}
+              deleteAlert={deleteAlert}
               loading={loading}
             />
           </>
@@ -752,6 +798,7 @@ function AlertsPage({
   selectedAlert,
   setSelectedAlert,
   resolveAlert,
+  deleteAlert,
   loading = false,
 }) {
   const [filterState, setFilterState] = useState("all");
@@ -840,14 +887,30 @@ function AlertsPage({
                   <span>{alert.description}</span>
                 </div>
 
-                <div
-                  className={`status-badge ${
-                    alert.state === "active"
-                      ? "status-active"
-                      : "status-resolved"
-                  }`}
-                >
-                  ● {alert.state === "active" ? "LEAK DETECTED" : "RESOLVED"}
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div
+                    className={`status-badge ${
+                      alert.state === "active"
+                        ? "status-active"
+                        : "status-resolved"
+                    }`}
+                  >
+                    ● {alert.state === "active" ? "LEAK DETECTED" : "RESOLVED"}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="delete-alert-btn"
+                    title="Delete this alert"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm("Are you sure you want to delete this alert?")) {
+                        deleteAlert(alert.id);
+                      }
+                    }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
               </div>
             ))
@@ -937,15 +1000,29 @@ function AlertsPage({
               <p>{selectedAlert.description}</p>
             </div>
 
-            {selectedAlert.state === "active" && (
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+              {selectedAlert.state === "active" && (
+                <button
+                  type="button"
+                  className="resolve-alert-button"
+                  onClick={() => resolveAlert(selectedAlert.id)}
+                >
+                  ✓ Resolve Alert
+                </button>
+              )}
+
               <button
                 type="button"
-                className="resolve-alert-button"
-                onClick={() => resolveAlert(selectedAlert.id)}
+                className="delete-alert-button"
+                onClick={() => {
+                  if (window.confirm("Are you sure you want to delete this alert?")) {
+                    deleteAlert(selectedAlert.id);
+                  }
+                }}
               >
-                ✓ Resolve Alert
+                <Trash2 size={15} /> Delete Alert
               </button>
-            )}
+            </div>
           </aside>
         )}
       </div>

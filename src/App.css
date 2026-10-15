@@ -1895,6 +1895,51 @@ button:focus-visible {
   border-color: #78b987;
 }
 
+/* Delete alert button in details panel */
+.delete-alert-button {
+  flex: 1;
+  padding: 14px;
+  border: 1px solid #f5a3a3;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #dc2626;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.delete-alert-button:hover {
+  background: #fee2e2;
+  border-color: #ef4444;
+}
+
+/* Compact delete icon button in alert list cards */
+.delete-alert-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.delete-alert-btn:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #ef4444;
+}
+
 /* =========================================================
    INFO
 ========================================================= */
