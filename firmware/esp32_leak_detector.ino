@@ -1,7 +1,8 @@
 /*
  * =====================================================================================
  *  ESP32 + INMP441 Microphone — Compressed Air Acoustic Leak Detector
- *  Protocol: MQTT over TLS → HiveMQ Cloud
+ *  Protocol: MQTT → HiveMQ Public Broker (broker.hivemq.com)
+ *  Single Topic Architecture: acoustic-leak-detection/sensor-data
  * =====================================================================================
  *  Hardware Connections (ESP32 <-> INMP441 I2S Microphone):
  *    - VDD   -> 3.3V
@@ -13,52 +14,40 @@
  *
  *  Onboard Indicator LED: GPIO 2
  *
- *  Required Arduino Libraries (install via Library Manager):
- *    - PubSubClient  by Nick O'Leary   (MQTT)
- *    - ArduinoJson   by Benoit Blanchon (JSON payload)
- *    - WiFiClientSecure (built-in ESP32 core)
+ *  Required Arduino Libraries:
+ *    - PubSubClient  by Nick O'Leary    (MQTT Client)
+ *    - ArduinoJson   by Benoit Blanchon (JSON serialization)
  * =====================================================================================
  */
 
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <driver/i2s.h>
 #include <math.h>
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  CONFIGURATION — fill in your credentials
+//  CONFIGURATION
 // ─────────────────────────────────────────────────────────────────────────────
 
-// WiFi
+// WiFi Credentials
 const char* WIFI_SSID     = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
-// HiveMQ Cloud
-// Find these in: HiveMQ Cloud dashboard → Cluster → Details
-const char* MQTT_BROKER   = "YOUR_CLUSTER_ID.s1.eu.hivemq.cloud"; // e.g. abc12345.s1.eu.hivemq.cloud
-const int   MQTT_PORT     = 8883;                                  // TLS port
-const char* MQTT_USER     = "YOUR_HIVEMQ_USERNAME";
-const char* MQTT_PASS     = "YOUR_HIVEMQ_PASSWORD";
-const char* MQTT_CLIENT_ID = "esp32-leak-detector-node03";         // unique per device
+// HiveMQ Public Broker (Free & No Account / Certificate Required)
+const char* MQTT_BROKER   = "broker.hivemq.com";
+const int   MQTT_PORT     = 1883;
+const char* MQTT_CLIENT_ID = "esp32-acoustic-leak-node01"; // unique per ESP32
 
-// Node identity
-const char*  NODE_ID      = "Node 03";   // Change per device: Node 01 … Node 12
-const float  THRESHOLD_DB = 70.0;        // Leak alarm threshold in dB
+// Single MQTT Topic (matches Dashboard & Server)
+#define TOPIC_TELEMETRY "acoustic-leak-detection/sensor-data"
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  MQTT TOPICS (must match server/src/services/mqttService.js)
-// ─────────────────────────────────────────────────────────────────────────────
-// Sensor reading: published every loop
-#define TOPIC_SENSOR       "compressed-air/sensor"
-// Node heartbeat: published every 30 s
-#define TOPIC_NODE_STATUS  "compressed-air/node/Node 03/status"  // change to match NODE_ID
-// Alert: published when leak is detected
-#define TOPIC_ALERT        "compressed-air/alert"
+// Node Identity & Acoustic Threshold
+const char* NODE_ID      = "Node 01";  // Change per device: Node 01, Node 02, etc.
+const float THRESHOLD_DB = 70.0;       // Leak threshold in dB
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  I2S PIN CONFIG (INMP441)
+//  I2S PIN CONFIG (INMP441 Microphone)
 // ─────────────────────────────────────────────────────────────────────────────
 #define I2S_WS          15
 #define I2S_SCK         14
@@ -71,20 +60,18 @@ const float  THRESHOLD_DB = 70.0;        // Leak alarm threshold in dB
 // ─────────────────────────────────────────────────────────────────────────────
 //  TIMING
 // ─────────────────────────────────────────────────────────────────────────────
-#define PUBLISH_INTERVAL_MS    3000   // send sensor reading every 3 s
-#define HEARTBEAT_INTERVAL_MS  30000  // send node heartbeat every 30 s
+#define PUBLISH_INTERVAL_MS 2500  // Send telemetry every 2.5 seconds
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  GLOBALS
 // ─────────────────────────────────────────────────────────────────────────────
-WiFiClientSecure wifiClient;
-PubSubClient     mqttClient(wifiClient);
+WiFiClient   wifiClient;
+PubSubClient mqttClient(wifiClient);
 
-unsigned long lastPublishTime   = 0;
-unsigned long lastHeartbeatTime = 0;
+unsigned long lastPublishTime = 0;
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  I2S SETUP
+//  I2S INITIALIZATION
 // ─────────────────────────────────────────────────────────────────────────────
 void setupI2S() {
   i2s_config_t i2s_config = {
@@ -110,11 +97,11 @@ void setupI2S() {
 
   i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
   i2s_set_pin(I2S_PORT, &pin_config);
-  Serial.println("[I2S] INMP441 microphone initialized");
+  Serial.println("[I2S] INMP441 microphone initialized successfully");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  SOUND LEVEL MEASUREMENT
+//  SOUND LEVEL MEASUREMENT (RMS to Decibels)
 // ─────────────────────────────────────────────────────────────────────────────
 float measureSoundLevelDB() {
   int32_t samples[BUFFER_SAMPLES];
@@ -152,95 +139,54 @@ void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("\n[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
   } else {
-    Serial.println("\n[WiFi] FAILED — restarting in 5 s");
+    Serial.println("\n[WiFi] Connection failed — restarting in 5 s");
     delay(5000);
     ESP.restart();
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  MQTT CONNECTION / RECONNECT
+//  MQTT CONNECTION (HiveMQ Public Broker)
 // ─────────────────────────────────────────────────────────────────────────────
 void connectMQTT() {
   while (!mqttClient.connected()) {
-    Serial.printf("[MQTT] Connecting to HiveMQ as %s ...", MQTT_CLIENT_ID);
-    if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS)) {
-      Serial.println(" OK!");
+    Serial.printf("[MQTT] Connecting to %s:1883 as %s ...", MQTT_BROKER, MQTT_CLIENT_ID);
+    if (mqttClient.connect(MQTT_CLIENT_ID)) {
+      Serial.println(" CONNECTED!");
       digitalWrite(LED_PIN, HIGH);
     } else {
-      Serial.printf(" FAILED (state=%d), retry in 5 s\n", mqttClient.state());
+      Serial.printf(" FAILED (rc=%d), retrying in 4 s\n", mqttClient.state());
       digitalWrite(LED_PIN, LOW);
-      delay(5000);
+      delay(4000);
     }
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  PUBLISH — Sensor Reading
-//  Topic: compressed-air/sensor
-//  Payload: { "nodeId": "Node 03", "soundLevel": 42.3, "threshold": 70.0, "leakDetected": false }
+//  PUBLISH — Single Topic Telemetry
 // ─────────────────────────────────────────────────────────────────────────────
-void publishSensorReading(float soundLevel, bool leakDetected) {
-  StaticJsonDocument<200> doc;
+void publishTelemetry(float soundLevel, bool leakDetected) {
+  StaticJsonDocument<350> doc;
   doc["nodeId"]       = NODE_ID;
   doc["soundLevel"]   = roundf(soundLevel * 10) / 10.0;
   doc["threshold"]    = THRESHOLD_DB;
   doc["leakDetected"] = leakDetected;
+  doc["status"]       = leakDetected ? "leak" : "normal";
 
-  char payload[200];
+  // If leak is detected, attach alert details directly in the payload
+  if (leakDetected) {
+    JsonObject alertDoc = doc.createNestedObject("alert");
+    alertDoc["title"]       = (soundLevel >= 85.0) ? "Critical Air Leak" : "Air Leak Warning";
+    alertDoc["severity"]    = (soundLevel >= 85.0) ? "critical" : "warning";
+    alertDoc["description"] = "Acoustic level reached " + String(soundLevel, 1) + " dB (Threshold: " + String((int)THRESHOLD_DB) + " dB)";
+  }
+
+  char payload[350];
   serializeJson(doc, payload);
 
-  bool ok = mqttClient.publish(TOPIC_SENSOR, payload, true);
-  Serial.printf("[MQTT] Sensor → %s | dB=%.1f | leak=%s | %s\n",
-    TOPIC_SENSOR, soundLevel, leakDetected ? "YES" : "no", ok ? "OK" : "FAIL");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PUBLISH — Alert
-//  Topic: compressed-air/alert
-//  Payload: { "nodeId": "Node 03", "title": "Critical Air Leak", "severity": "critical",
-//             "soundLevel": 88.5, "description": "..." }
-// ─────────────────────────────────────────────────────────────────────────────
-void publishAlert(float soundLevel) {
-  const char* severity = (soundLevel >= 85.0) ? "critical" : "warning";
-  const char* title    = (soundLevel >= 85.0) ? "Critical Air Leak" : "Air Leak Warning";
-
-  char description[128];
-  snprintf(description, sizeof(description),
-    "Acoustic activity of %.1f dB exceeded %.0f dB threshold on %s",
-    soundLevel, THRESHOLD_DB, NODE_ID);
-
-  StaticJsonDocument<300> doc;
-  doc["nodeId"]      = NODE_ID;
-  doc["title"]       = title;
-  doc["severity"]    = severity;
-  doc["soundLevel"]  = roundf(soundLevel * 10) / 10.0;
-  doc["threshold"]   = THRESHOLD_DB;
-  doc["description"] = description;
-
-  char payload[300];
-  serializeJson(doc, payload);
-
-  mqttClient.publish(TOPIC_ALERT, payload, false);
-  Serial.printf("[MQTT] ⚠️  Alert published: %s (%.1f dB)\n", severity, soundLevel);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PUBLISH — Node Heartbeat
-//  Topic: compressed-air/node/Node 03/status
-//  Payload: { "nodeId": "Node 03", "status": "normal", "soundLevel": 42.3 }
-// ─────────────────────────────────────────────────────────────────────────────
-void publishHeartbeat(float soundLevel, bool leakDetected) {
-  StaticJsonDocument<150> doc;
-  doc["nodeId"]     = NODE_ID;
-  doc["status"]     = leakDetected ? "leak" : "normal";
-  doc["soundLevel"] = roundf(soundLevel * 10) / 10.0;
-
-  char payload[150];
-  serializeJson(doc, payload);
-
-  mqttClient.publish(TOPIC_NODE_STATUS, payload, true); // retained = true
-  Serial.printf("[MQTT] 💓 Heartbeat published for %s\n", NODE_ID);
+  bool ok = mqttClient.publish(TOPIC_TELEMETRY, payload, false);
+  Serial.printf("[MQTT] %s | Node=%s | dB=%.1f | leak=%s | %s\n",
+    TOPIC_TELEMETRY, NODE_ID, soundLevel, leakDetected ? "LEAK" : "OK", ok ? "SENT" : "ERR");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -250,20 +196,16 @@ void setup() {
   Serial.begin(115200);
   delay(500);
 
-  Serial.println("\n╔══════════════════════════════════════════════╗");
-  Serial.println("║  Compressed Air Acoustic Leak Detector       ║");
-  Serial.println("║  ESP32 + INMP441  →  HiveMQ MQTT            ║");
-  Serial.println("╚══════════════════════════════════════════════╝");
+  Serial.println("\n╔══════════════════════════════════════════════════╗");
+  Serial.println("║  Acoustic Compressed Air Leak Detector           ║");
+  Serial.println("║  ESP32 + INMP441 → HiveMQ Public Broker          ║");
+  Serial.println("╚══════════════════════════════════════════════════╝");
 
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
 
   setupI2S();
   connectWiFi();
-
-  // HiveMQ Cloud uses TLS — skip certificate verification for simplicity
-  // For production: load the ISRG Root X1 CA cert
-  wifiClient.setInsecure();
 
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
   mqttClient.setKeepAlive(30);
@@ -274,43 +216,28 @@ void setup() {
 //  MAIN LOOP
 // ─────────────────────────────────────────────────────────────────────────────
 void loop() {
-  // Reconnect WiFi if dropped
+  // Ensure WiFi is connected
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[WiFi] Lost connection — reconnecting...");
     connectWiFi();
   }
 
-  // Reconnect MQTT if dropped
+  // Ensure MQTT is connected
   if (!mqttClient.connected()) {
     connectMQTT();
   }
   mqttClient.loop();
 
   unsigned long now = millis();
-
-  // ── Publish sensor reading every PUBLISH_INTERVAL_MS ─────────────────────
   if (now - lastPublishTime >= PUBLISH_INTERVAL_MS) {
     lastPublishTime = now;
 
     float soundLevel   = measureSoundLevelDB();
     bool  leakDetected = (soundLevel >= THRESHOLD_DB);
 
-    // Update LED
+    // Indicator LED: ON if leak detected, OFF if normal
     digitalWrite(LED_PIN, leakDetected ? HIGH : LOW);
 
-    // Publish sensor reading to HiveMQ
-    publishSensorReading(soundLevel, leakDetected);
-
-    // If leak, also publish an alert
-    if (leakDetected) {
-      publishAlert(soundLevel);
-    }
-  }
-
-  // ── Heartbeat every HEARTBEAT_INTERVAL_MS ────────────────────────────────
-  if (now - lastHeartbeatTime >= HEARTBEAT_INTERVAL_MS) {
-    lastHeartbeatTime = now;
-    float soundLevel  = measureSoundLevelDB();
-    publishHeartbeat(soundLevel, soundLevel >= THRESHOLD_DB);
+    // Publish to the single topic
+    publishTelemetry(soundLevel, leakDetected);
   }
 }

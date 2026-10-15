@@ -15,6 +15,7 @@ let ioRef = null;
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const TOPICS = {
+  TELEMETRY:   process.env.MQTT_TOPIC || 'acoustic-leak-detection/sensor-data',
   SENSOR:      'compressed-air/sensor',
   NODE_STATUS: 'compressed-air/node/+/status',
   ALERT:       'compressed-air/alert',
@@ -27,22 +28,16 @@ export const TOPICS = {
 export function initMqtt(io) {
   ioRef = io;
 
-  const BROKER_URL  = process.env.HIVEMQ_BROKER_URL;
+  const BROKER_URL  = process.env.HIVEMQ_BROKER_URL || 'broker.hivemq.com';
   const MQTT_USER   = process.env.HIVEMQ_USERNAME || null;
   const MQTT_PASS   = process.env.HIVEMQ_PASSWORD || null;
   const MQTT_PORT   = parseInt(process.env.HIVEMQ_PORT || '1883', 10);
-
-  if (!BROKER_URL) {
-    console.log('\n⚠️  [MQTT] HIVEMQ_BROKER_URL not set in server/.env — skipping MQTT connection.');
-    console.log('   Set it when you have your HiveMQ credentials and restart the server.\n');
-    return;
-  }
 
   const brokerUri = BROKER_URL.startsWith('mqtts://') || BROKER_URL.startsWith('mqtt://')
     ? BROKER_URL
     : `mqtt://${BROKER_URL}:${MQTT_PORT}`;
 
-  console.log(`\n🔌 [MQTT] Connecting to HiveMQ broker: ${brokerUri} (public, no auth)`);
+  console.log(`\n🔌 [MQTT] Connecting to HiveMQ broker: ${brokerUri}`);
 
   const connectOptions = {
     clientId: `compressed-air-server-${Math.random().toString(16).slice(2, 8)}`,
@@ -63,12 +58,12 @@ export function initMqtt(io) {
     mqttConnected = true;
     console.log('✅ [MQTT] Connected to HiveMQ!');
 
-    // Subscribe to all ESP32 topics
-    mqttClient.subscribe(Object.values(TOPICS), { qos: 1 }, (err) => {
+    // Subscribe to all topics (single topic + legacy)
+    mqttClient.subscribe(Object.values(TOPICS), { qos: 0 }, (err) => {
       if (err) {
         console.error('❌ [MQTT] Subscribe error:', err.message);
       } else {
-        console.log('📡 [MQTT] Subscribed to topics:', Object.values(TOPICS).join(', '));
+        console.log('📡 [MQTT] Subscribed to topic:', TOPICS.TELEMETRY);
       }
     });
 
@@ -105,8 +100,8 @@ export function initMqtt(io) {
 
     console.log(`[MQTT] 📨 ${topic}:`, JSON.stringify(data));
 
-    // ── 1. Sensor reading from ESP32 ────────────────────────────────────
-    if (topic === TOPICS.SENSOR) {
+    // ── 1. Unified Single Telemetry Topic ────────────────────────────────
+    if (topic === TOPICS.TELEMETRY || topic === TOPICS.SENSOR) {
       await handleSensorReading(data);
     }
 

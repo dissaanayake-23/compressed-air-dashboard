@@ -65,129 +65,226 @@ function App() {
   ];
 
   /* =======================================================
-     FETCH DATABASE DATA & CONNECT WEBSOCKET
+     HIVEMQ PUBLIC BROKER MQTT & REAL-TIME STREAMING
      ======================================================= */
+  const MQTT_BROKER = import.meta.env.VITE_MQTT_BROKER_URL || "wss://broker.hivemq.com:8884/mqtt";
+  const MQTT_TOPIC = import.meta.env.VITE_MQTT_TOPIC || "acoustic-leak-detection/sensor-data";
+
   useEffect(() => {
     const API_BASE = import.meta.env.VITE_API_URL || "";
+    let mqttClient = null;
 
-    const fetchDatabaseData = async () => {
-      try {
-        const [sensorRes, nodesRes, alertsRes, histRes] = await Promise.all([
-          fetch(`${API_BASE}/api/sensor/latest`).then((r) => r.json()),
-          fetch(`${API_BASE}/api/nodes`).then((r) => r.json()),
-          fetch(`${API_BASE}/api/alerts`).then((r) => r.json()),
-          fetch(`${API_BASE}/api/history`).then((r) => r.json()),
+    // Helper: Process incoming telemetry from ESP32 via MQTT (or fallback REST)
+    const processTelemetry = (data) => {
+      if (!data) return;
+      const {
+        nodeId = "Node 01",
+        soundLevel,
+        threshold: itemThreshold = 70,
+        leakDetected: rawLeak,
+        alert: alertInfo,
+      } = data;
+
+      const numericSound = soundLevel !== undefined && soundLevel !== null ? parseFloat(soundLevel) : null;
+      const numericThreshold = parseFloat(itemThreshold);
+      const isLeak = rawLeak !== undefined
+        ? Boolean(rawLeak)
+        : (numericSound !== null && numericSound >= numericThreshold);
+
+      if (numericSound !== null && !isNaN(numericSound)) {
+        setSoundLevel(numericSound);
+      }
+      if (!isNaN(numericThreshold)) {
+        setThreshold(numericThreshold);
+      }
+      setLeakDetected(isLeak);
+
+      // Dynamically register or update node
+      setNodes((currentNodes) => {
+        const existingIdx = currentNodes.findIndex((n) => n.id === nodeId);
+        const nodeData = {
+          id: nodeId,
+          name: nodeId,
+          soundLevel: numericSound,
+          status: isLeak ? "leak" : "normal",
+          lastSeen: new Date().toISOString(),
+        };
+
+        let updated;
+        if (existingIdx >= 0) {
+          updated = [...currentNodes];
+          updated[existingIdx] = { ...updated[existingIdx], ...nodeData };
+        } else {
+          updated = [...currentNodes, nodeData];
+        }
+        try { localStorage.setItem("cached_nodes", JSON.stringify(updated)); } catch {}
+        return updated;
+      });
+
+      // If leak detected, create active alert (preventing spam duplicates)
+      if (isLeak) {
+        const title = alertInfo?.title || (numericSound !== null && numericSound >= numericThreshold + 15 ? "Critical Air Leak" : "Air Leak Warning");
+        const severity = alertInfo?.severity || (numericSound !== null && numericSound >= numericThreshold + 15 ? "critical" : "warning");
+        const description = alertInfo?.description || `Abnormal acoustic level reached ${numericSound ?? ""} dB (Threshold: ${numericThreshold} dB)`;
+
+        setAlerts((currentAlerts) => {
+          const alreadyActive = currentAlerts.some((a) => a.node === nodeId && a.state === "active");
+          if (alreadyActive) return currentAlerts;
+
+          const newAlert = {
+            id: `alert-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            node: nodeId,
+            title,
+            severity,
+            soundLevel: numericSound ?? numericThreshold,
+            threshold: numericThreshold,
+            state: "active",
+            description,
+            createdAt: new Date().toISOString(),
+          };
+          const updated = [newAlert, ...currentAlerts];
+          try { localStorage.setItem("cached_alerts", JSON.stringify(updated)); } catch {}
+          return updated;
+        });
+
+        // Add history record
+        const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        setHistoryRecords((prev) => [
+          {
+            id: `h-${Date.now()}`,
+            time: `Today, ${timeStr}`,
+            node: nodeId,
+            event: "Leak Event Detected",
+            status: "leak",
+          },
+          ...prev.slice(0, 49),
         ]);
-
-        if (sensorRes?.sensor) {
-          setSoundLevel(sensorRes.sensor.soundLevel);
-          setThreshold(sensorRes.sensor.threshold);
-          setLeakDetected(sensorRes.sensor.leakDetected);
-        }
-        if (Array.isArray(nodesRes) && nodesRes.length > 0) {
-          setNodes(nodesRes);
-          try { localStorage.setItem("cached_nodes", JSON.stringify(nodesRes)); } catch {}
-        }
-        if (Array.isArray(alertsRes)) {
-          setAlerts(alertsRes);
-          try { localStorage.setItem("cached_alerts", JSON.stringify(alertsRes)); } catch {}
-        }
-        if (Array.isArray(histRes)) {
-          setHistoryRecords(histRes);
-        }
-        setBackendStatus("connected");
-        setLoading(false);
-      } catch (err) {
-        console.warn("Could not reach backend API:", err);
-        setBackendStatus("offline");
-        setLoading(false);
       }
     };
 
-    fetchDatabaseData();
+    // 1. Connect to HiveMQ Public MQTT Broker over Secure WebSockets (WSS)
+    const connectHiveMQ = () => {
+      const mqttLib = typeof window !== "undefined" ? window.mqtt : null;
+      if (!mqttLib) {
+        setTimeout(connectHiveMQ, 400);
+        return;
+      }
 
-    // Setup Socket.io real-time streaming
-    const socket = io(API_BASE || undefined, {
-      transports: ["websocket", "polling"],
-      reconnectionAttempts: 10,
-    });
+      try {
+        console.log(`🔌 [HiveMQ MQTT] Connecting to broker: ${MQTT_BROKER}...`);
+        mqttClient = mqttLib.connect(MQTT_BROKER, {
+          clientId: `dashboard_${Math.random().toString(16).substring(2, 10)}`,
+          clean: true,
+          reconnectPeriod: 3000,
+          connectTimeout: 10000,
+        });
 
-    socket.on("connect", () => {
-      console.log("⚡ [WebSocket] Connected to Real-Time Leak Detection Server");
-      setBackendStatus("connected");
-    });
+        mqttClient.on("connect", () => {
+          console.log(`✅ [HiveMQ MQTT] Connected to broker: ${MQTT_BROKER}`);
+          setBackendStatus("connected");
+          setLoading(false);
 
-    socket.on("disconnect", () => {
-      console.log("⚠️ [WebSocket] Disconnected from server");
-      setBackendStatus("connecting");
-    });
+          mqttClient.subscribe(MQTT_TOPIC, { qos: 0 }, (err) => {
+            if (!err) {
+              console.log(`📡 [HiveMQ MQTT] Subscribed to topic: "${MQTT_TOPIC}"`);
+            } else {
+              console.error(`❌ [HiveMQ MQTT] Subscription error:`, err);
+            }
+          });
+        });
 
-    socket.on("sensor:update", (data) => {
-      if (data.soundLevel !== undefined) setSoundLevel(data.soundLevel);
-      if (data.threshold !== undefined) setThreshold(data.threshold);
-      if (data.leakDetected !== undefined) setLeakDetected(data.leakDetected);
-    });
+        mqttClient.on("message", (topic, payload) => {
+          if (topic === MQTT_TOPIC) {
+            try {
+              const data = JSON.parse(payload.toString());
+              console.log(`📥 [HiveMQ MQTT] Telemetry received on ${topic}:`, data);
+              processTelemetry(data);
+            } catch (err) {
+              console.warn("Could not parse MQTT JSON payload:", payload.toString());
+            }
+          }
+        });
 
-    socket.on("alert:new", (newAlert) => {
-      setAlerts((currentAlerts) => [
-        newAlert,
-        ...currentAlerts.filter((a) => a.id !== newAlert.id),
-      ]);
-    });
+        mqttClient.on("reconnect", () => {
+          console.log("🔄 [HiveMQ MQTT] Reconnecting to broker...");
+          setBackendStatus("connecting");
+        });
 
-    socket.on("alert:resolved", (resolvedAlert) => {
-      setAlerts((currentAlerts) =>
-        currentAlerts.map((alert) =>
-          alert.id === resolvedAlert.id
-            ? { ...alert, state: "resolved", resolvedAt: resolvedAlert.resolvedAt }
-            : alert
-        )
-      );
-    });
+        mqttClient.on("close", () => {
+          setBackendStatus("connecting");
+        });
 
-    socket.on("node:status", (updatedNode) => {
-      setNodes((currentNodes) =>
-        currentNodes.map((n) =>
-          n.id === updatedNode.id ? { ...n, ...updatedNode } : n
-        )
-      );
-    });
+        mqttClient.on("error", (err) => {
+          console.error("❌ [HiveMQ MQTT] Error:", err?.message || err);
+        });
+      } catch (err) {
+        console.error("❌ [HiveMQ MQTT] Initialization error:", err);
+      }
+    };
+
+    connectHiveMQ();
+
+    // 2. Fallback REST API initial fetch if VITE_API_URL is configured
+    if (API_BASE) {
+      fetch(`${API_BASE}/api/sensor/latest`)
+        .then((r) => r.json())
+        .then((res) => {
+          if (res?.sensor) processTelemetry(res.sensor);
+        })
+        .catch(() => {});
+    }
 
     return () => {
-      socket.disconnect();
+      if (mqttClient) {
+        console.log("🔌 [HiveMQ MQTT] Disconnecting...");
+        mqttClient.end(true);
+      }
     };
-  }, []);
+  }, [MQTT_BROKER, MQTT_TOPIC]);
 
   /* =======================================================
-     RESOLVE ALERT (PERSISTS TO RAILWAY POSTGRESQL)
+     RESOLVE ALERT
      ======================================================= */
   async function resolveAlert(id) {
     const API_BASE = import.meta.env.VITE_API_URL || "";
 
     // Optimistic UI update
-    setAlerts((currentAlerts) =>
-      currentAlerts.map((alert) =>
-        alert.id === id ? { ...alert, state: "resolved" } : alert
-      )
-    );
+    setAlerts((currentAlerts) => {
+      const updated = currentAlerts.map((alert) =>
+        alert.id === id ? { ...alert, state: "resolved", resolvedAt: new Date().toISOString() } : alert
+      );
+      try { localStorage.setItem("cached_alerts", JSON.stringify(updated)); } catch {}
+      return updated;
+    });
 
     if (selectedAlert?.id === id) {
       setSelectedAlert((prev) => (prev ? { ...prev, state: "resolved" } : null));
     }
 
-    try {
-      const response = await fetch(`${API_BASE}/api/alerts/${id}/resolve`, {
-        method: "PATCH",
-      });
-      if (response.ok) {
-        // Refresh history from DB to reflect resolution record
-        const histRes = await fetch(`${API_BASE}/api/history`).then((r) => r.json());
-        if (Array.isArray(histRes)) {
-          setHistoryRecords(histRes);
-        }
+    const resolvedAlertObj = alerts.find((a) => a.id === id);
+    if (resolvedAlertObj) {
+      setNodes((currentNodes) =>
+        currentNodes.map((n) => (n.id === resolvedAlertObj.node ? { ...n, status: "normal" } : n))
+      );
+      const nowStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      setHistoryRecords((prev) => [
+        {
+          id: `h-${Date.now()}`,
+          time: `Today, ${nowStr}`,
+          node: resolvedAlertObj.node,
+          event: "Leak Alert Resolved",
+          status: "normal",
+        },
+        ...prev.slice(0, 49),
+      ]);
+    }
+
+    if (API_BASE) {
+      try {
+        await fetch(`${API_BASE}/api/alerts/${id}/resolve`, { method: "PATCH" });
+      } catch (err) {
+        console.warn("Could not sync resolution with backend:", err);
       }
-    } catch (err) {
-      console.error("Failed to resolve alert on backend:", err);
     }
   }
 
@@ -244,7 +341,7 @@ function App() {
 
         </nav>
 
-        {/* BACKEND CONNECTION BADGE */}
+        {/* BACKEND & HIVEMQ CONNECTION BADGE */}
         <div style={{ marginTop: "auto", padding: "16px 20px" }}>
           <div
             style={{
@@ -268,10 +365,10 @@ function App() {
             />
             <div style={{ lineHeight: 1.2 }}>
               <div style={{ fontSize: "12px", fontWeight: "700", color: backendStatus === "connected" ? "#065f46" : "#92400e" }}>
-                {backendStatus === "connected" ? "Backend Online" : "Connecting..."}
+                {backendStatus === "connected" ? "HiveMQ MQTT Online" : "Connecting..."}
               </div>
               <div style={{ fontSize: "11px", color: backendStatus === "connected" ? "#047857" : "#b45309" }}>
-                {backendStatus === "connected" ? "Railway & Sockets Active" : "Reconnecting to Server"}
+                {backendStatus === "connected" ? "broker.hivemq.com (Active)" : "Reconnecting to Broker"}
               </div>
             </div>
           </div>
@@ -297,7 +394,7 @@ function App() {
               subtitle={
                 nodes.length > 0
                   ? `Real-time monitoring across ${nodes.length} connected detection node${nodes.length === 1 ? "" : "s"}.`
-                  : "Real-time monitoring. Waiting for connected nodes."
+                  : "Real-time acoustic monitoring platform. Listening for MQTT telemetry."
               }
               backendStatus={backendStatus}
             />
@@ -305,6 +402,10 @@ function App() {
             <Dashboard
               alerts={alerts}
               nodes={nodes}
+              soundLevel={soundLevel}
+              threshold={threshold}
+              leakDetected={leakDetected}
+              mqttTopic={MQTT_TOPIC}
               loading={loading}
             />
           </>
@@ -407,7 +508,7 @@ function SimplePageHeader({
               boxShadow: backendStatus === "connected" ? "0 0 8px #2ecc71" : "none",
             }}
           />
-          {backendStatus === "connected" ? "PostgreSQL & Live Socket" : "Offline / Reconnecting"}
+          {backendStatus === "connected" ? "HiveMQ MQTT & Live Stream" : "Connecting..."}
         </span>
       </div>
 
@@ -422,6 +523,10 @@ function SimplePageHeader({
 function Dashboard({
   alerts,
   nodes = [],
+  soundLevel = null,
+  threshold = 70,
+  leakDetected = false,
+  mqttTopic = "acoustic-leak-detection/sensor-data",
 }) {
   const totalAlerts = alerts.length;
   const activeAlerts = alerts.filter((alert) => alert.state === "active").length;
@@ -429,6 +534,79 @@ function Dashboard({
 
   return (
     <div className="dashboard">
+
+      {/* =================================================
+          LIVE ACOUSTIC TELEMETRY METER
+      ================================================= */}
+      <section style={{
+        background: leakDetected ? "linear-gradient(135deg, #fff5f5 0%, #ffffff 100%)" : "linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)",
+        border: leakDetected ? "1px solid #fecaca" : "1px solid #bbf7d0",
+        borderRadius: "14px",
+        padding: "18px 24px",
+        marginBottom: "24px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        flexWrap: "wrap",
+        gap: "16px",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.03)"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+          <div style={{
+            width: "48px",
+            height: "48px",
+            borderRadius: "12px",
+            backgroundColor: leakDetected ? "#fee2e2" : "#dcfce7",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: leakDetected ? "#ef4444" : "#16a34a"
+          }}>
+            <Activity size={24} />
+          </div>
+          <div>
+            <div style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              Live Acoustic Reading
+            </div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "2px" }}>
+              <span style={{ fontSize: "28px", fontWeight: "800", color: leakDetected ? "#dc2626" : "#0f172a" }}>
+                {soundLevel !== null ? `${soundLevel.toFixed(1)} dB` : "-- dB"}
+              </span>
+              <span style={{ fontSize: "13px", color: "#64748b" }}>
+                (Threshold: {threshold} dB)
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <span style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "6px 14px",
+            borderRadius: "20px",
+            fontSize: "12px",
+            fontWeight: "700",
+            backgroundColor: leakDetected ? "#ef4444" : "#22c55e",
+            color: "#ffffff"
+          }}>
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#ffffff" }} />
+            {leakDetected ? "LEAK DETECTED" : "ACOUSTIC NORMAL"}
+          </span>
+
+          <span style={{
+            padding: "6px 12px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            backgroundColor: "#f1f5f9",
+            color: "#475569",
+            fontFamily: "monospace"
+          }}>
+            Topic: {mqttTopic}
+          </span>
+        </div>
+      </section>
 
       {/* =================================================
           SUMMARY STATISTICS
