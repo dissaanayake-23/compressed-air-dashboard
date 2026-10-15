@@ -12,15 +12,6 @@ import {
   AlertTriangle,
 } from "lucide-react";
 
-const DEFAULT_NODES = Array.from({ length: 12 }, (_, i) => {
-  const id = `Node ${String(i + 1).padStart(2, "0")}`;
-  return { id, name: id, status: "normal" };
-});
-
-/* =========================================================
-   MAIN APPLICATION
-   ========================================================= */
-
 function App() {
   const [activePage, setActivePage] = useState("dashboard");
 
@@ -37,16 +28,16 @@ function App() {
   const [nodes, setNodes] = useState(() => {
     try {
       const saved = localStorage.getItem("cached_nodes");
-      return saved ? JSON.parse(saved) : DEFAULT_NODES;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return DEFAULT_NODES;
+      return [];
     }
   });
 
-  const [soundLevel, setSoundLevel] = useState(42.0);
+  const [soundLevel, setSoundLevel] = useState(null);
   const [threshold, setThreshold] = useState(70);
   const [leakDetected, setLeakDetected] = useState(false);
-  const [backendStatus, setBackendStatus] = useState("connected");
+  const [backendStatus, setBackendStatus] = useState("connecting");
   const [historyRecords, setHistoryRecords] = useState([]);
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -303,7 +294,11 @@ function App() {
             <SimplePageHeader
               page="Dashboard"
               title="Acoustic Leak Dashboard"
-              subtitle="Real-time monitoring across 12 connected detection nodes."
+              subtitle={
+                nodes.length > 0
+                  ? `Real-time monitoring across ${nodes.length} connected detection node${nodes.length === 1 ? "" : "s"}.`
+                  : "Real-time monitoring. Waiting for connected nodes."
+              }
               backendStatus={backendStatus}
             />
 
@@ -445,7 +440,7 @@ function Dashboard({
           icon={<Bell size={21} />}
           title="Total Alerts"
           value={totalAlerts}
-          text="Recorded events in PostgreSQL"
+          text="Recorded events"
         />
 
         <SummaryCard
@@ -460,7 +455,7 @@ function Dashboard({
           icon={<ShieldCheck size={21} />}
           title="Resolved Alerts"
           value={resolvedAlerts}
-          text="Issues cleared in PostgreSQL"
+          text="Issues cleared"
           type="resolved"
         />
 
@@ -478,44 +473,65 @@ function Dashboard({
           <p>Real-time leak status for all monitoring nodes across the system.</p>
         </div>
 
-        <div className="nodes-grid">
-          {nodes.map((node) => {
-            const hasLeak =
-              alerts.some((a) => a.node === node.id && a.state === "active") ||
-              node.status === "leak";
+        {nodes.length > 0 ? (
+          <div className="nodes-grid">
+            {nodes.map((node) => {
+              const hasLeak =
+                alerts.some((a) => a.node === node.id && a.state === "active") ||
+                node.status === "leak";
 
-            return (
-              <div
-                key={node.id}
-                className={`node-card ${hasLeak ? "has-leak" : ""}`}
-              >
-                <div className="node-card-top">
-                  <div className="node-icon-box">
-                    <Cpu size={20} />
+              return (
+                <div
+                  key={node.id}
+                  className={`node-card ${hasLeak ? "has-leak" : ""}`}
+                >
+                  <div className="node-card-top">
+                    <div className="node-icon-box">
+                      <Cpu size={20} />
+                    </div>
+
+                    <span
+                      className={`node-status-badge ${
+                        hasLeak ? "leak" : "normal"
+                      }`}
+                    >
+                      <span className="node-status-dot"></span>
+                      {hasLeak ? "LEAK DETECTED" : "NORMAL"}
+                    </span>
                   </div>
 
-                  <span
-                    className={`node-status-badge ${
-                      hasLeak ? "leak" : "normal"
-                    }`}
-                  >
-                    <span className="node-status-dot"></span>
-                    {hasLeak ? "LEAK DETECTED" : "NORMAL"}
-                  </span>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <h4 className="node-title">{node.name}</h4>
+                    {node.soundLevel !== undefined && (
+                      <span style={{ fontSize: "13px", color: hasLeak ? "#ef4444" : "#64748b", fontWeight: "600" }}>
+                        {node.soundLevel} dB
+                      </span>
+                    )}
+                  </div>
                 </div>
-
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                  <h4 className="node-title">{node.name}</h4>
-                  {node.soundLevel !== undefined && (
-                    <span style={{ fontSize: "13px", color: hasLeak ? "#ef4444" : "#64748b", fontWeight: "600" }}>
-                      {node.soundLevel} dB
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{
+            background: "#ffffff",
+            borderRadius: "14px",
+            border: "1px dashed #cbd5e1",
+            padding: "48px 24px",
+            textAlign: "center",
+            color: "#64748b",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "12px",
+          }}>
+            <Cpu size={36} color="#94a3b8" />
+            <h4 style={{ margin: 0, color: "#1e293b", fontSize: "16px" }}>No Monitoring Nodes Active Yet</h4>
+            <p style={{ margin: 0, fontSize: "14px", maxWidth: "440px" }}>
+              Nodes will appear here automatically in real time as soon as ESP32 detection units begin streaming acoustic readings.
+            </p>
+          </div>
+        )}
 
       </section>
 
@@ -659,7 +675,7 @@ function AlertsPage({
             ))
           ) : (
             <div style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
-              {loading ? "Loading alerts from PostgreSQL..." : "No alerts match the selected filter."}
+              {loading ? "Loading alerts..." : "No alerts match the selected filter."}
             </div>
           )}
         </div>

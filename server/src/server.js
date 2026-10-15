@@ -94,10 +94,10 @@ app.get('/', (req, res) => {
   });
 });
 
-// Optional realistic acoustic simulator for demonstration
+// Optional realistic acoustic simulator for demonstration (off by default)
 let simulatorInterval = null;
 function startSimulator() {
-  if (process.env.ENABLE_SIMULATOR === 'false') return;
+  if (process.env.ENABLE_SIMULATOR !== 'true') return;
 
   console.log('⚡ Acoustic simulator active (generating realistic ambient noise and periodic leak tests)');
 

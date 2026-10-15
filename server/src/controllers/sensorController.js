@@ -1,14 +1,7 @@
 import { isPostgresConnected, pool, inMemoryStore } from '../config/db.js';
 import { broadcastSensorUpdate, broadcastAlertNew, broadcastNodeStatus } from '../services/socketService.js';
 
-let latestReading = {
-  soundLevel: 42.6,
-  threshold: 70,
-  leakDetected: false,
-  status: "normal",
-  nodeId: "Node 03",
-  timestamp: Date.now(),
-};
+let latestReading = null;
 
 export async function getLatestSensor(req, res) {
   try {
@@ -32,14 +25,19 @@ export async function getLatestSensor(req, res) {
 }
 
 export async function ingestReading(req, res) {
-  const { nodeId = "Node 03", soundLevel, threshold } = req.body;
+  const body = req?.body || req || {};
+  const { nodeId, soundLevel, threshold } = body;
 
-  if (soundLevel === undefined || soundLevel === null) {
-    return res.status(400).json({ error: 'soundLevel is required' });
+  if (!nodeId || soundLevel === undefined || soundLevel === null) {
+    if (res && res.status) {
+      return res.status(400).json({ error: 'nodeId and soundLevel are required' });
+    }
+    return;
   }
 
   const numericSound = parseFloat(soundLevel);
-  const numericThreshold = threshold !== undefined ? parseFloat(threshold) : latestReading.threshold;
+  const currentThreshold = latestReading?.threshold ?? inMemoryStore.settings?.threshold ?? 70.0;
+  const numericThreshold = threshold !== undefined ? parseFloat(threshold) : currentThreshold;
   const leakDetected = numericSound >= numericThreshold;
   const status = leakDetected ? (numericSound >= numericThreshold + 15 ? "critical" : "warning") : "normal";
   const now = Date.now();
@@ -62,12 +60,15 @@ export async function ingestReading(req, res) {
         [nodeId, numericSound, numericThreshold, leakDetected, status]
       );
 
-      // Update node status
+      // Dynamically register or update node
       await pool.query(
-        `UPDATE nodes 
-         SET sound_level = $1, status = $2, last_seen = NOW() 
-         WHERE id = $3`,
-        [numericSound, leakDetected ? 'leak' : 'normal', nodeId]
+        `INSERT INTO nodes (id, name, status, sound_level, last_seen)
+         VALUES ($1, $1, $2, $3, NOW())
+         ON CONFLICT (id) DO UPDATE
+         SET sound_level = EXCLUDED.sound_level,
+             status = EXCLUDED.status,
+             last_seen = NOW()`,
+        [nodeId, leakDetected ? 'leak' : 'normal', numericSound]
       );
 
       // If leak detected, check for existing active alert
@@ -112,12 +113,20 @@ export async function ingestReading(req, res) {
         }
       }
     } else {
-      // In-memory fallback
+      // In-memory fallback: dynamically register or update node
       const nodeObj = inMemoryStore.nodes.find(n => n.id === nodeId);
       if (nodeObj) {
         nodeObj.sound_level = numericSound;
         nodeObj.status = leakDetected ? 'leak' : 'normal';
         nodeObj.last_seen = new Date();
+      } else {
+        inMemoryStore.nodes.push({
+          id: nodeId,
+          name: nodeId,
+          status: leakDetected ? 'leak' : 'normal',
+          sound_level: numericSound,
+          last_seen: new Date(),
+        });
       }
 
       if (leakDetected) {
@@ -158,13 +167,17 @@ export async function ingestReading(req, res) {
     broadcastSensorUpdate(latestReading);
     broadcastNodeStatus({ id: nodeId, status: leakDetected ? 'leak' : 'normal', soundLevel: numericSound });
 
-    return res.status(200).json({
-      success: true,
-      data: latestReading,
-    });
+    if (res && res.status) {
+      return res.status(200).json({
+        success: true,
+        data: latestReading,
+      });
+    }
   } catch (err) {
     console.error('Error ingesting reading:', err);
-    res.status(500).json({ error: 'Failed to process sensor reading' });
+    if (res && res.status) {
+      res.status(500).json({ error: 'Failed to process sensor reading' });
+    }
   }
 }
 
