@@ -36,12 +36,9 @@ export async function ingestReading(req, res) {
     return;
   }
 
-  // If node was explicitly deleted by user, do not resurrect it into database or store
+  // If node was previously in deleted list, receiving fresh reading unblocks it
   if (deletedNodeIds && deletedNodeIds.has(String(nodeId).toLowerCase())) {
-    if (res && res.json) {
-      return res.json({ message: 'Ignored reading for deleted node' });
-    }
-    return;
+    deletedNodeIds.delete(String(nodeId).toLowerCase());
   }
 
   // Parse binary leak status from hardware (handles boolean true/false, "leak"/"normal", 1/0, "true"/"false")

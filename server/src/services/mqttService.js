@@ -147,7 +147,7 @@ async function handleSensorReading(data) {
 
   // Reuse the existing ingestReading controller
   try {
-    await ingestReading({ nodeId, soundLevel, threshold, leakDetected });
+    await ingestReading({ nodeId, soundLevel, threshold, leakDetected, alert: data.alert, status: data.status });
 
     // Real-time push to dashboard
     ioRef?.emit('sensor:update', { nodeId, soundLevel, threshold, leakDetected, isBinarySensor: true });
