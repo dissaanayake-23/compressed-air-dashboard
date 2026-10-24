@@ -1013,7 +1013,6 @@ function Dashboard({
             <div className="clean-empty-nodes">
               <Cpu size={32} />
               <h4>No Monitoring Nodes Connected</h4>
-              <p>Hardware nodes will stream into this view as ESP32 microcontrollers publish MQTT telemetry.</p>
             </div>
           )}
         </div>
