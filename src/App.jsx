@@ -70,6 +70,11 @@ function App() {
     }
   });
 
+  const nodesRef = useRef(nodes);
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
   // Track explicitly deleted node IDs so streaming telemetry doesn't immediately resurrect them
   const [deletedNodeIds, setDeletedNodeIds] = useState(() => {
     try {
@@ -188,13 +193,15 @@ function App() {
       const nodeId = data.nodeId || data.node_id || data.id || data.node;
       if (!nodeId) return;
 
-      // If user previously deleted this node, receiving fresh telemetry unblocks it
-      if (deletedNodeIdsRef.current && deletedNodeIdsRef.current.has(String(nodeId).toLowerCase())) {
-        deletedNodeIdsRef.current.delete(String(nodeId).toLowerCase());
-        try {
-          localStorage.setItem("deleted_node_ids", JSON.stringify(Array.from(deletedNodeIdsRef.current)));
-        } catch {}
+      // If a node is not registered, block that message!
+      const isRegistered = nodesRef.current && nodesRef.current.some(
+        (n) => String(n.id).toLowerCase() === String(nodeId).toLowerCase()
+      );
+      if (!isRegistered) {
+        console.warn(`🛑 [MQTT] Blocked message from unregistered node: "${nodeId}"`);
+        return;
       }
+
       const {
         soundLevel,
         threshold: itemThreshold = 70,
@@ -244,25 +251,19 @@ function App() {
       setLeakDetected(isLeak);
       setLastMqttTime(Date.now());
 
-      // Dynamically register or update node
+      // Update registered node's live data
       setNodes((currentNodes) => {
-        const existingIdx = currentNodes.findIndex((n) => n.id === nodeId);
-        const nodeData = {
-          id: nodeId,
-          name: nodeId,
+        const existingIdx = currentNodes.findIndex((n) => String(n.id).toLowerCase() === String(nodeId).toLowerCase());
+        if (existingIdx === -1) return currentNodes;
+
+        const updated = [...currentNodes];
+        updated[existingIdx] = {
+          ...updated[existingIdx],
           soundLevel: numericSound,
           status: isLeak ? "leak" : "normal",
           lastSeen: new Date().toISOString(),
           isBinarySensor: !hasRawSound,
         };
-
-        let updated;
-        if (existingIdx >= 0) {
-          updated = [...currentNodes];
-          updated[existingIdx] = { ...updated[existingIdx], ...nodeData };
-        } else {
-          updated = [...currentNodes, nodeData];
-        }
         try { localStorage.setItem("cached_nodes", JSON.stringify(updated)); } catch {}
         return updated;
       });

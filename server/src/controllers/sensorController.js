@@ -36,9 +36,25 @@ export async function ingestReading(req, res) {
     return;
   }
 
-  // If node was previously in deleted list, receiving fresh reading unblocks it
-  if (deletedNodeIds && deletedNodeIds.has(String(nodeId).toLowerCase())) {
-    deletedNodeIds.delete(String(nodeId).toLowerCase());
+  // If node is not registered, block that message
+  let isRegistered = false;
+  try {
+    if (isPostgresConnected && pool) {
+      const nodeCheck = await pool.query('SELECT id FROM nodes WHERE LOWER(id) = LOWER($1)', [nodeId]);
+      isRegistered = nodeCheck.rows.length > 0;
+    } else {
+      isRegistered = inMemoryStore.nodes.some(n => n.id.toLowerCase() === String(nodeId).toLowerCase());
+    }
+  } catch (err) {
+    console.error('[Ingest] Error verifying node registration:', err);
+  }
+
+  if (!isRegistered) {
+    console.warn(`🛑 [Ingest] Blocked reading: Node "${nodeId}" is not registered.`);
+    if (res && res.status) {
+      return res.status(403).json({ error: `Node "${nodeId}" is not registered. Message blocked.` });
+    }
+    return;
   }
 
   // Parse binary leak status from hardware (handles boolean true/false, "leak"/"normal", 1/0, "true"/"false")
@@ -77,15 +93,14 @@ export async function ingestReading(req, res) {
         [nodeId, numericSound, numericThreshold, leakDetected, status]
       );
 
-      // Dynamically register or update node
+      // Update registered node
       await pool.query(
-        `INSERT INTO nodes (id, name, status, sound_level, last_seen)
-         VALUES ($1, $1, $2, $3, NOW())
-         ON CONFLICT (id) DO UPDATE
-         SET sound_level = EXCLUDED.sound_level,
-             status = EXCLUDED.status,
-             last_seen = NOW()`,
-        [nodeId, leakDetected ? 'leak' : 'normal', numericSound]
+        `UPDATE nodes
+         SET sound_level = $1,
+             status = $2,
+             last_seen = NOW()
+         WHERE LOWER(id) = LOWER($3)`,
+        [numericSound, leakDetected ? 'leak' : 'normal', nodeId]
       );
 
       // If leak detected, always create a new unique alert
@@ -123,20 +138,12 @@ export async function ingestReading(req, res) {
         );
       }
     } else {
-      // In-memory fallback: dynamically register or update node
-      const nodeObj = inMemoryStore.nodes.find(n => n.id === nodeId);
+      // In-memory fallback: update registered node
+      const nodeObj = inMemoryStore.nodes.find(n => n.id.toLowerCase() === nodeId.toLowerCase());
       if (nodeObj) {
         nodeObj.sound_level = numericSound;
         nodeObj.status = leakDetected ? 'leak' : 'normal';
         nodeObj.last_seen = new Date();
-      } else {
-        inMemoryStore.nodes.push({
-          id: nodeId,
-          name: nodeId,
-          status: leakDetected ? 'leak' : 'normal',
-          sound_level: numericSound,
-          last_seen: new Date(),
-        });
       }
 
       if (leakDetected) {
