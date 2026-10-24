@@ -1,5 +1,6 @@
 import { isPostgresConnected, pool, inMemoryStore } from '../config/db.js';
 import { broadcastSensorUpdate, broadcastAlertNew, broadcastNodeStatus } from '../services/socketService.js';
+import { deletedNodeIds } from './nodeController.js';
 
 let latestReading = null;
 
@@ -31,6 +32,14 @@ export async function ingestReading(req, res) {
   if (!nodeId) {
     if (res && res.status) {
       return res.status(400).json({ error: 'nodeId is required' });
+    }
+    return;
+  }
+
+  // If node was explicitly deleted by user, do not resurrect it into database or store
+  if (deletedNodeIds && deletedNodeIds.has(String(nodeId).toLowerCase())) {
+    if (res && res.json) {
+      return res.json({ message: 'Ignored reading for deleted node' });
     }
     return;
   }

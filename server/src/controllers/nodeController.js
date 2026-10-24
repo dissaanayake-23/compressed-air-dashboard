@@ -1,5 +1,8 @@
 import { isPostgresConnected, pool, inMemoryStore } from '../config/db.js';
 
+// Set of explicitly deleted node IDs to prevent telemetry from immediately resurrecting them
+export const deletedNodeIds = new Set();
+
 export async function getNodes(req, res) {
   try {
     if (isPostgresConnected && pool) {
@@ -72,6 +75,9 @@ export async function createNode(req, res) {
   if (!id || !name) {
     return res.status(400).json({ error: 'id and name are required' });
   }
+
+  // Clear tombstone if previously deleted
+  deletedNodeIds.delete(String(id).toLowerCase());
 
   try {
     if (isPostgresConnected && pool) {
@@ -232,6 +238,11 @@ export async function updateNode(req, res) {
 
 export async function deleteNode(req, res) {
   const { id } = req.params;
+
+  // Add to deleted tombstone to prevent telemetry auto-resurrecting this node
+  if (id) {
+    deletedNodeIds.add(String(id).toLowerCase());
+  }
 
   try {
     if (isPostgresConnected && pool) {

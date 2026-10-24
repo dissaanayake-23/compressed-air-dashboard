@@ -51,9 +51,9 @@ function App() {
   const [nodes, setNodes] = useState(() => {
     try {
       const saved = localStorage.getItem("cached_nodes");
-      if (saved) {
+      if (saved !== null) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
       return [
         { id: "Node 01", name: "Node 01", status: "normal", soundLevel: 88.5, lastSeen: new Date().toISOString(), location: "Compressor Room A", description: "Primary inlet compressor station" },
@@ -64,6 +64,59 @@ function App() {
       return [];
     }
   });
+
+  // Track explicitly deleted node IDs so streaming telemetry doesn't immediately resurrect them
+  const [deletedNodeIds, setDeletedNodeIds] = useState(() => {
+    try {
+      const saved = localStorage.getItem("deleted_node_ids");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const deletedNodeIdsRef = useRef(
+    new Set(
+      (() => {
+        try {
+          const saved = localStorage.getItem("deleted_node_ids");
+          const arr = saved ? JSON.parse(saved) : [];
+          return Array.isArray(arr) ? arr.map((id) => String(id).toLowerCase()) : [];
+        } catch {
+          return [];
+        }
+      })()
+    )
+  );
+
+  const markNodeDeleted = (nodeId) => {
+    if (!nodeId) return;
+    const lower = String(nodeId).toLowerCase();
+    deletedNodeIdsRef.current.add(lower);
+    const updated = Array.from(deletedNodeIdsRef.current);
+    setDeletedNodeIds(updated);
+    try {
+      localStorage.setItem("deleted_node_ids", JSON.stringify(updated));
+    } catch {}
+
+    // Clean up any alerts tied to this deleted node
+    setAlerts((currentAlerts) => {
+      const filtered = currentAlerts.filter((a) => a.node !== nodeId);
+      try { localStorage.setItem("cached_alerts", JSON.stringify(filtered)); } catch {}
+      return filtered;
+    });
+  };
+
+  const markNodeRestored = (nodeId) => {
+    if (!nodeId) return;
+    const lower = String(nodeId).toLowerCase();
+    deletedNodeIdsRef.current.delete(lower);
+    const updated = Array.from(deletedNodeIdsRef.current);
+    setDeletedNodeIds(updated);
+    try {
+      localStorage.setItem("deleted_node_ids", JSON.stringify(updated));
+    } catch {}
+  };
 
   const [soundLevel, setSoundLevel] = useState(88.5);
   const [threshold, setThreshold] = useState(70);
@@ -155,8 +208,14 @@ function App() {
     const processTelemetry = (data) => {
       if (!data) return;
 
-      // Support any node ID key from hardware
-      const nodeId = data.nodeId || data.node_id || data.id || data.node || "Node 01";
+      // Support any node ID key from hardware (require valid ID, do not default to Node 01)
+      const nodeId = data.nodeId || data.node_id || data.id || data.node;
+      if (!nodeId) return;
+
+      // If user explicitly deleted this node, ignore telemetry so it doesn't resurrect
+      if (deletedNodeIdsRef.current && deletedNodeIdsRef.current.has(String(nodeId).toLowerCase())) {
+        return;
+      }
       const {
         soundLevel,
         threshold: itemThreshold = 70,
@@ -678,6 +737,8 @@ function App() {
               nodes={nodes}
               setNodes={setNodes}
               alerts={alerts}
+              onDeleteNode={markNodeDeleted}
+              onRegisterNode={markNodeRestored}
             />
           </>
         )}
@@ -2376,7 +2437,7 @@ function HistoryPage({ historyRecords = [], nodes = [] }) {
    NODES MANAGEMENT PAGE
    ========================================================= */
 
-function NodesPage({ nodes = [], setNodes, alerts = [] }) {
+function NodesPage({ nodes = [], setNodes, alerts = [], onDeleteNode, onRegisterNode }) {
   const [showForm, setShowForm] = useState(false);
   const [editingNode, setEditingNode] = useState(null);
   const [formData, setFormData] = useState({
@@ -2571,6 +2632,10 @@ function NodesPage({ nodes = [], setNodes, alerts = [] }) {
       return updated;
     });
 
+    if (onRegisterNode) {
+      onRegisterNode(trimmedId);
+    }
+
     const actionText = editingNode ? "updated" : "registered";
     const statusText = API_BASE && !backendSaved ? `(saved locally)` : `successfully!`;
     setSuccessMsg(`Node "${trimmedName}" ${actionText} ${statusText}`);
@@ -2599,6 +2664,10 @@ function NodesPage({ nodes = [], setNodes, alerts = [] }) {
       } catch {}
       return updated;
     });
+
+    if (onDeleteNode) {
+      onDeleteNode(nodeId);
+    }
 
     setSuccessMsg(`Node "${nodeId}" removed.`);
     setTimeout(() => setSuccessMsg(""), 4000);
