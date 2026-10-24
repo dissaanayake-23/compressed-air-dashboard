@@ -55,7 +55,9 @@ export async function initDb() {
         status VARCHAR(20) DEFAULT 'normal',
         sound_level NUMERIC(5, 2) DEFAULT 0.0,
         last_seen TIMESTAMPTZ DEFAULT NOW(),
-        created_at TIMESTAMPTZ DEFAULT NOW()
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        location VARCHAR(255) DEFAULT '',
+        description TEXT DEFAULT ''
       );
 
       CREATE TABLE IF NOT EXISTS alerts (

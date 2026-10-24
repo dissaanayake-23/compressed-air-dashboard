@@ -11,6 +11,10 @@ import {
   ShieldCheck,
   AlertTriangle,
   Trash2,
+  Plus,
+  Edit3,
+  MapPin,
+  Server,
 } from "lucide-react";
 
 function App() {
@@ -57,6 +61,11 @@ function App() {
       id: "alerts",
       label: "Alerts",
       icon: Bell,
+    },
+    {
+      id: "nodes",
+      label: "Nodes",
+      icon: Server,
     },
     {
       id: "history",
@@ -249,11 +258,36 @@ function App() {
   async function resolveAlert(id) {
     const API_BASE = import.meta.env.VITE_API_URL || "";
 
-    // Optimistic UI update
+    // Use functional updater to get the current alert before changing state
+    let resolvedNodeId = null;
+
     setAlerts((currentAlerts) => {
+      // Find the alert being resolved from the CURRENT state (not stale closure)
+      const target = currentAlerts.find((a) => a.id === id);
+      if (target) {
+        resolvedNodeId = target.node;
+      }
+
       const updated = currentAlerts.map((alert) =>
         alert.id === id ? { ...alert, state: "resolved", resolvedAt: new Date().toISOString() } : alert
       );
+
+      // Check if this node has any OTHER active alerts remaining
+      const nodeStillHasActive = updated.some(
+        (a) => a.node === resolvedNodeId && a.state === "active"
+      );
+
+      // Update nodes status if no other active alerts remain for this node
+      if (resolvedNodeId && !nodeStillHasActive) {
+        setNodes((currentNodes) => {
+          const updatedNodes = currentNodes.map((n) =>
+            n.id === resolvedNodeId ? { ...n, status: "normal" } : n
+          );
+          try { localStorage.setItem("cached_nodes", JSON.stringify(updatedNodes)); } catch {}
+          return updatedNodes;
+        });
+      }
+
       try { localStorage.setItem("cached_alerts", JSON.stringify(updated)); } catch {}
       return updated;
     });
@@ -262,17 +296,14 @@ function App() {
       setSelectedAlert((prev) => (prev ? { ...prev, state: "resolved" } : null));
     }
 
-    const resolvedAlertObj = alerts.find((a) => a.id === id);
-    if (resolvedAlertObj) {
-      setNodes((currentNodes) =>
-        currentNodes.map((n) => (n.id === resolvedAlertObj.node ? { ...n, status: "normal" } : n))
-      );
+    // Add history record
+    if (resolvedNodeId) {
       const nowStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       setHistoryRecords((prev) => [
         {
           id: `h-${Date.now()}`,
           time: `Today, ${nowStr}`,
-          node: resolvedAlertObj.node,
+          node: resolvedNodeId,
           event: "Leak Alert Resolved",
           status: "normal",
         },
@@ -476,6 +507,27 @@ function App() {
               resolveAlert={resolveAlert}
               deleteAlert={deleteAlert}
               loading={loading}
+            />
+          </>
+        )}
+
+        {/* =================================================
+            NODES
+        ================================================= */}
+
+        {activePage === "nodes" && (
+          <>
+            <SimplePageHeader
+              page="Nodes"
+              title="Node Management"
+              subtitle="Register, edit, and manage monitoring nodes."
+              backendStatus={backendStatus}
+            />
+
+            <NodesPage
+              nodes={nodes}
+              setNodes={setNodes}
+              alerts={alerts}
             />
           </>
         )}
@@ -700,9 +752,10 @@ function Dashboard({
         {nodes.length > 0 ? (
           <div className="nodes-grid">
             {nodes.map((node) => {
-              const hasLeak =
-                alerts.some((a) => a.node === node.id && a.state === "active") ||
-                node.status === "leak";
+              // Only check for active alerts — don't fall back to stale node.status
+              const hasLeak = alerts.some(
+                (a) => a.node === node.id && a.state === "active"
+              );
 
               return (
                 <div
@@ -1122,6 +1175,389 @@ function HistoryPage({ historyRecords = [], nodes = [] }) {
       </div>
 
     </section>
+  );
+}
+
+/* =========================================================
+   NODES MANAGEMENT PAGE
+   ========================================================= */
+
+function NodesPage({ nodes = [], setNodes, alerts = [] }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingNode, setEditingNode] = useState(null);
+  const [formData, setFormData] = useState({
+    id: "",
+    name: "",
+    location: "",
+    description: "",
+  });
+  const [formError, setFormError] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
+
+  const API_BASE = import.meta.env.VITE_API_URL || "";
+
+  function resetForm() {
+    setFormData({ id: "", name: "", location: "", description: "" });
+    setFormError("");
+    setEditingNode(null);
+  }
+
+  function openAddForm() {
+    resetForm();
+    setShowForm(true);
+  }
+
+  function openEditForm(node) {
+    setFormData({
+      id: node.id,
+      name: node.name || node.id,
+      location: node.location || "",
+      description: node.description || "",
+    });
+    setEditingNode(node);
+    setShowForm(true);
+    setFormError("");
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    resetForm();
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setFormError("");
+    setSuccessMsg("");
+
+    const trimmedId = formData.id.trim();
+    const trimmedName = formData.name.trim();
+
+    if (!trimmedId) {
+      setFormError("Node ID is required.");
+      return;
+    }
+    if (!trimmedName) {
+      setFormError("Node name is required.");
+      return;
+    }
+
+    if (!editingNode) {
+      // Check for duplicate ID
+      const exists = nodes.some((n) => n.id.toLowerCase() === trimmedId.toLowerCase());
+      if (exists) {
+        setFormError(`A node with ID "${trimmedId}" already exists.`);
+        return;
+      }
+    }
+
+    const nodeData = {
+      id: trimmedId,
+      name: trimmedName,
+      location: formData.location.trim(),
+      description: formData.description.trim(),
+      status: editingNode ? editingNode.status : "normal",
+      soundLevel: editingNode ? editingNode.soundLevel : 0,
+      lastSeen: editingNode ? editingNode.lastSeen : new Date().toISOString(),
+    };
+
+    // Try to save to backend
+    if (API_BASE) {
+      try {
+        const method = editingNode ? "PUT" : "POST";
+        const url = editingNode
+          ? `${API_BASE}/api/nodes/${editingNode.id}`
+          : `${API_BASE}/api/nodes`;
+        const resp = await fetch(url, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(nodeData),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          setFormError(err.error || "Failed to save node to server.");
+          return;
+        }
+      } catch (err) {
+        console.warn("Backend save failed, saving locally:", err);
+      }
+    }
+
+    // Update local state
+    setNodes((current) => {
+      let updated;
+      if (editingNode) {
+        updated = current.map((n) =>
+          n.id === editingNode.id ? { ...n, ...nodeData } : n
+        );
+      } else {
+        updated = [...current, nodeData];
+      }
+      try {
+        localStorage.setItem("cached_nodes", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    setSuccessMsg(editingNode ? `Node "${trimmedName}" updated successfully!` : `Node "${trimmedName}" registered successfully!`);
+    closeForm();
+
+    setTimeout(() => setSuccessMsg(""), 4000);
+  }
+
+  async function handleDelete(nodeId) {
+    if (!window.confirm(`Are you sure you want to remove node "${nodeId}"? This cannot be undone.`)) {
+      return;
+    }
+
+    if (API_BASE) {
+      try {
+        await fetch(`${API_BASE}/api/nodes/${nodeId}`, { method: "DELETE" });
+      } catch (err) {
+        console.warn("Backend delete failed:", err);
+      }
+    }
+
+    setNodes((current) => {
+      const updated = current.filter((n) => n.id !== nodeId);
+      try {
+        localStorage.setItem("cached_nodes", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    setSuccessMsg(`Node "${nodeId}" removed.`);
+    setTimeout(() => setSuccessMsg(""), 4000);
+  }
+
+  return (
+    <div className="nodes-page">
+      {/* Success Banner */}
+      {successMsg && (
+        <div className="nodes-success-banner">
+          <ShieldCheck size={18} />
+          <span>{successMsg}</span>
+        </div>
+      )}
+
+      {/* Action Bar */}
+      <div className="nodes-action-bar">
+        <div className="nodes-stats-row">
+          <div className="nodes-stat-chip">
+            <Server size={16} />
+            <span>{nodes.length} Total Node{nodes.length !== 1 ? "s" : ""}</span>
+          </div>
+          <div className="nodes-stat-chip online">
+            <span className="nodes-stat-dot" />
+            <span>{nodes.filter((n) => !alerts.some((a) => a.node === n.id && a.state === "active")).length} Normal</span>
+          </div>
+          <div className="nodes-stat-chip leak">
+            <span className="nodes-stat-dot" />
+            <span>{nodes.filter((n) => alerts.some((a) => a.node === n.id && a.state === "active")).length} With Leaks</span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="nodes-add-btn"
+          onClick={openAddForm}
+        >
+          <Plus size={18} />
+          Register Node
+        </button>
+      </div>
+
+      {/* Registration / Edit Form */}
+      {showForm && (
+        <div className="nodes-form-overlay" onClick={closeForm}>
+          <div className="nodes-form-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="nodes-form-header">
+              <div>
+                <h3>{editingNode ? "Edit Node" : "Register New Node"}</h3>
+                <p>{editingNode ? "Update the node details below." : "Add a new monitoring node to the system."}</p>
+              </div>
+              <button type="button" className="nodes-form-close" onClick={closeForm}>×</button>
+            </div>
+
+            {formError && (
+              <div className="nodes-form-error">
+                <AlertTriangle size={16} />
+                <span>{formError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="nodes-form-body">
+              <div className="nodes-form-group">
+                <label htmlFor="node-id">Node ID *</label>
+                <input
+                  id="node-id"
+                  type="text"
+                  placeholder="e.g. Node 04"
+                  value={formData.id}
+                  onChange={(e) => setFormData({ ...formData, id: e.target.value })}
+                  disabled={!!editingNode}
+                  autoFocus={!editingNode}
+                />
+                {!editingNode && (
+                  <span className="nodes-form-hint">Unique identifier. Must match ESP32 node ID.</span>
+                )}
+              </div>
+
+              <div className="nodes-form-group">
+                <label htmlFor="node-name">Display Name *</label>
+                <input
+                  id="node-name"
+                  type="text"
+                  placeholder="e.g. Compressor Room A"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  autoFocus={!!editingNode}
+                />
+              </div>
+
+              <div className="nodes-form-group">
+                <label htmlFor="node-location">
+                  <MapPin size={14} style={{ marginRight: "6px", verticalAlign: "middle" }} />
+                  Location
+                </label>
+                <input
+                  id="node-location"
+                  type="text"
+                  placeholder="e.g. Building 2, Floor 3"
+                  value={formData.location}
+                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                />
+              </div>
+
+              <div className="nodes-form-group">
+                <label htmlFor="node-desc">Description</label>
+                <textarea
+                  id="node-desc"
+                  rows={3}
+                  placeholder="Optional notes about this node..."
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                />
+              </div>
+
+              <div className="nodes-form-actions">
+                <button type="button" className="nodes-form-cancel" onClick={closeForm}>
+                  Cancel
+                </button>
+                <button type="submit" className="nodes-form-submit">
+                  {editingNode ? "Update Node" : "Register Node"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Nodes List */}
+      {nodes.length > 0 ? (
+        <div className="nodes-table-container">
+          <div className="nodes-table">
+            <div className="nodes-table-header">
+              <span>Node</span>
+              <span>Status</span>
+              <span>Sound Level</span>
+              <span>Location</span>
+              <span>Last Seen</span>
+              <span>Actions</span>
+            </div>
+
+            {nodes.map((node) => {
+              const hasActiveLeak = alerts.some(
+                (a) => a.node === node.id && a.state === "active"
+              );
+              const lastSeenStr = node.lastSeen
+                ? new Date(node.lastSeen).toLocaleString([], {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : "Never";
+
+              return (
+                <div
+                  key={node.id}
+                  className={`nodes-table-row ${hasActiveLeak ? "row-leak" : ""}`}
+                >
+                  <span className="nodes-table-name">
+                    <div className="nodes-table-icon-box">
+                      <Cpu size={18} />
+                    </div>
+                    <div>
+                      <strong>{node.name || node.id}</strong>
+                      <small>{node.id}</small>
+                    </div>
+                  </span>
+
+                  <span>
+                    <span
+                      className={`node-status-badge ${hasActiveLeak ? "leak" : "normal"}`}
+                    >
+                      <span className="node-status-dot" />
+                      {hasActiveLeak ? "LEAK" : "NORMAL"}
+                    </span>
+                  </span>
+
+                  <span className="nodes-table-db">
+                    {node.soundLevel !== undefined && node.soundLevel !== null
+                      ? `${node.soundLevel} dB`
+                      : "—"}
+                  </span>
+
+                  <span className="nodes-table-location">
+                    {node.location || "—"}
+                  </span>
+
+                  <span className="nodes-table-lastseen">{lastSeenStr}</span>
+
+                  <span className="nodes-table-actions">
+                    <button
+                      type="button"
+                      className="nodes-edit-btn"
+                      title="Edit node"
+                      onClick={() => openEditForm(node)}
+                    >
+                      <Edit3 size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="nodes-delete-btn"
+                      title="Remove node"
+                      onClick={() => handleDelete(node.id)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="nodes-empty-state">
+          <div className="nodes-empty-icon">
+            <Server size={42} />
+          </div>
+          <h4>No Monitoring Nodes Registered</h4>
+          <p>
+            Register your first node to start monitoring. Nodes will also appear
+            automatically when ESP32 units begin streaming data via MQTT.
+          </p>
+          <button
+            type="button"
+            className="nodes-add-btn"
+            onClick={openAddForm}
+          >
+            <Plus size={18} />
+            Register Your First Node
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
