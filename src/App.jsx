@@ -827,8 +827,6 @@ function Dashboard({
   mqttEvents = [],
   setActivePage,
 }) {
-  const [selectedNodeDetails, setSelectedNodeDetails] = useState(null);
-
   const totalAlerts = alerts.length;
   const activeAlerts = alerts.filter((a) => a.state === "active").length;
   const resolvedAlerts = alerts.filter((a) => a.state === "resolved").length;
@@ -927,7 +925,6 @@ function Dashboard({
                   <div
                     key={node.id}
                     className={`clean-node-card ${hasLeak ? "has-leak" : "normal"}`}
-                    onClick={() => setSelectedNodeDetails(node)}
                   >
                     <div className="clean-node-top">
                       <div className={`clean-node-icon ${hasLeak ? "leak" : "normal"}`}>
@@ -1028,18 +1025,6 @@ function Dashboard({
         </div>
 
       </section>
-
-      {/* Node Details Inspection Modal */}
-      {selectedNodeDetails && (
-        <NodeDetailsModal
-          node={selectedNodeDetails}
-          onClose={() => setSelectedNodeDetails(null)}
-          onNavigateToNodes={() => {
-            setSelectedNodeDetails(null);
-            if (setActivePage) setActivePage("nodes");
-          }}
-        />
-      )}
 
     </div>
   );
@@ -1912,119 +1897,6 @@ function SystemHealthCard({ connectedNodesCount = 3, lastMqttTime }) {
           <span>System SLA Uptime</span>
         </div>
         <strong className="health-metric-val">99.98% (14d 6h)</strong>
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   9. NODE DETAILS MODAL
-   ========================================================= */
-
-function NodeDetailsModal({ node, onClose, onNavigateToNodes }) {
-  if (!node) return null;
-
-  const isLeak = node.status === "leak";
-
-  return (
-    <div className="iot-modal-overlay" onClick={onClose}>
-      <div className="iot-modal-box" onClick={(e) => e.stopPropagation()}>
-        <div className="iot-modal-header">
-          <div className="modal-title-group">
-            <div className="modal-avatar">
-              <Cpu size={22} />
-            </div>
-            <div>
-              <h3>{node.name || node.id}</h3>
-              <p>Node ID: <code>{node.id}</code> • Status: <span className={isLeak ? "text-danger" : "text-success"}>{isLeak ? "LEAK DETECTED" : "NORMAL"}</span></p>
-            </div>
-          </div>
-          <button type="button" className="modal-close-btn" onClick={onClose}>
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="iot-modal-body">
-          {/* Location Photo Preview if available */}
-          {node.locationImage && (
-            <div className="modal-location-photo">
-              <img src={node.locationImage} alt="Node Location" />
-              <span className="photo-tag"><MapPin size={12} /> {node.location || "Facility Location"}</span>
-            </div>
-          )}
-
-          {/* Primary State Card */}
-          <div style={{
-            background: isLeak ? "#fff5f5" : "#f0fdf4",
-            border: isLeak ? "1.5px solid #fecaca" : "1.5px solid #bbf7d0",
-            borderRadius: "12px",
-            padding: "16px 20px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: "16px",
-          }}>
-            <div>
-              <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                HARDWARE DETECTION STATUS
-              </span>
-              <div style={{ fontSize: "20px", fontWeight: "800", color: isLeak ? "#dc2626" : "#16a34a", marginTop: "2px" }}>
-                {isLeak ? "LEAK ANOMALY ACTIVE" : "STATUS NORMAL (NO LEAK)"}
-              </div>
-            </div>
-            <span style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "6px 14px",
-              borderRadius: "20px",
-              fontSize: "12px",
-              fontWeight: "700",
-              background: isLeak ? "#ef4444" : "#10b981",
-              color: "#ffffff",
-            }}>
-              <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#fff" }} />
-              {isLeak ? "LEAK" : "NORMAL"}
-            </span>
-          </div>
-
-          {/* Clean Hardware Specs Grid */}
-          <div className="modal-specs-grid">
-            <div className="spec-item">
-              <span className="spec-label">Device Type</span>
-              <strong>Acoustic Leak Detector</strong>
-            </div>
-            <div className="spec-item">
-              <span className="spec-label">Communication</span>
-              <strong>MQTT (broker.hivemq.com)</strong>
-            </div>
-            <div className="spec-item">
-              <span className="spec-label">Location Zone</span>
-              <strong>{node.location || "Default Zone"}</strong>
-            </div>
-            <div className="spec-item">
-              <span className="spec-label">Last Telemetry</span>
-              <strong>{node.lastSeen ? new Date(node.lastSeen).toLocaleTimeString() : "Just now"}</strong>
-            </div>
-          </div>
-
-          {node.description && (
-            <div className="modal-notes" style={{ marginTop: "14px" }}>
-              <span className="spec-label">Description / Notes</span>
-              <p>{node.description}</p>
-            </div>
-          )}
-        </div>
-
-        <div className="iot-modal-footer">
-          <button type="button" className="modal-btn-secondary" onClick={onClose}>
-            Close
-          </button>
-          <button type="button" className="modal-btn-primary" onClick={onNavigateToNodes}>
-            <Edit3 size={14} />
-            Edit in Node Management
-          </button>
-        </div>
       </div>
     </div>
   );
