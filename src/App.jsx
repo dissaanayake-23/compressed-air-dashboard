@@ -188,9 +188,12 @@ function App() {
       const nodeId = data.nodeId || data.node_id || data.id || data.node;
       if (!nodeId) return;
 
-      // If user explicitly deleted this node, ignore telemetry so it doesn't resurrect
+      // Fresh telemetry from hardware automatically clears any prior delete tombstone
       if (deletedNodeIdsRef.current && deletedNodeIdsRef.current.has(String(nodeId).toLowerCase())) {
-        return;
+        deletedNodeIdsRef.current.delete(String(nodeId).toLowerCase());
+        try {
+          localStorage.setItem("deleted_node_ids", JSON.stringify(Array.from(deletedNodeIdsRef.current)));
+        } catch {}
       }
       const {
         soundLevel,
@@ -272,8 +275,17 @@ function App() {
         const description = alertInfo?.description || `Acoustic leak detected on ${nodeId} (Binary Hardware Signal)`;
 
         setAlerts((currentAlerts) => {
-          const alreadyActive = currentAlerts.some((a) => a.node === nodeId && a.state === "active");
-          if (alreadyActive) return currentAlerts;
+          const existingIdx = currentAlerts.findIndex((a) => a.node === nodeId && a.state === "active");
+          if (existingIdx >= 0) {
+            const updated = [...currentAlerts];
+            updated[existingIdx] = {
+              ...updated[existingIdx],
+              soundLevel: numericSound,
+              createdAt: new Date().toISOString(),
+            };
+            try { localStorage.setItem("cached_alerts", JSON.stringify(updated)); } catch {}
+            return updated;
+          }
 
           const newAlert = {
             id: `alert-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -342,11 +354,12 @@ function App() {
 
           const topicsToSub = [
             MQTT_TOPIC,
+            "acoustic-leak-detection/#",
             "acoustic-leak-detection/sensor-data",
             "acoustic-leak-detection/telemetry",
             "acoustic-leak-detection/node/+",
-            "compressed-air/sensor",
-            "compressed-air/#"
+            "compressed-air/#",
+            "compressed-air/sensor"
           ];
           topicsToSub.forEach((t) => {
             mqttClient.subscribe(t, { qos: 0 }, (err) => {
