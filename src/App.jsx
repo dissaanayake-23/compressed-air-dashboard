@@ -53,13 +53,18 @@ function App() {
       const saved = localStorage.getItem("cached_nodes");
       if (saved !== null) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) {
+          // If cached data contains the legacy mock nodes, purge them
+          const isLegacyMock =
+            parsed.length === 3 &&
+            parsed.some((n) => n.id === "Node 01" && n.location === "Compressor Room A") &&
+            parsed.some((n) => n.id === "Node 02" && n.location === "Distribution Line B");
+          if (!isLegacyMock) {
+            return parsed;
+          }
+        }
       }
-      return [
-        { id: "Node 01", name: "Node 01", status: "normal", soundLevel: 88.5, lastSeen: new Date().toISOString(), location: "Compressor Room A", description: "Primary inlet compressor station" },
-        { id: "Node 02", name: "Node 02", status: "normal", soundLevel: 88.5, lastSeen: new Date().toISOString(), location: "Distribution Line B", description: "Main feeder header line" },
-        { id: "Node 03", name: "Node 03", status: "normal", soundLevel: 88.5, lastSeen: new Date().toISOString(), location: "Main Header 01", description: "Downstream receiver manifold" },
-      ];
+      return [];
     } catch {
       return [];
     }
@@ -118,7 +123,7 @@ function App() {
     } catch {}
   };
 
-  const [soundLevel, setSoundLevel] = useState(88.5);
+  const [soundLevel, setSoundLevel] = useState(0);
   const [threshold, setThreshold] = useState(70);
   const [leakDetected, setLeakDetected] = useState(false);
   const [backendStatus, setBackendStatus] = useState("connecting");
@@ -126,46 +131,17 @@ function App() {
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Live acoustic rolling telemetry window (last 25 points)
-  const [acousticHistory, setAcousticHistory] = useState(() => {
-    const now = Date.now();
-    const points = [];
-    for (let i = 24; i >= 0; i--) {
-      const t = new Date(now - i * 3500);
-      const timeStr = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-      const base = 56 + Math.sin(i * 0.6) * 9 + (i === 1 || i === 2 ? 26 : 0);
-      points.push({
-        time: timeStr,
-        db: parseFloat(base.toFixed(1)),
-        isLeak: base >= 70,
-        node: "Node 01",
-      });
-    }
-    return points;
-  });
+  // Live acoustic rolling telemetry window (populated by live incoming telemetry)
+  const [acousticHistory, setAcousticHistory] = useState([]);
 
-  // Per-node sparkline histories (rolling 12 points)
-  const [nodeHistories, setNodeHistories] = useState({
-    "Node 01": [52, 55, 58, 62, 70, 78, 88.5, 84, 76, 72, 68, 88.5],
-    "Node 02": [48, 50, 52, 56, 60, 65, 72, 78, 85, 88.5, 82, 88.5],
-    "Node 03": [44, 46, 50, 52, 55, 60, 68, 75, 82, 86, 88.5, 88.5],
-  });
+  // Per-node sparkline histories (populated by live incoming telemetry)
+  const [nodeHistories, setNodeHistories] = useState({});
 
-  // Industrial operational activity log
-  const [recentActivities, setRecentActivities] = useState([
-    { id: 1, time: "10:50:12", event: "MQTT telemetry heartbeat synchronized", node: "All Nodes", type: "system" },
-    { id: 2, time: "10:47:35", event: "Leak incident marked Resolved by Operator", node: "Node 02", type: "nominal" },
-    { id: 3, time: "10:45:00", event: "Automated SMS/Telegram alert notification sent", node: "Node 01", type: "info" },
-    { id: 4, time: "10:43:18", event: "High Acoustic Anomaly Alert created (88.5 dB)", node: "Node 01", type: "alert" },
-    { id: 5, time: "10:42:04", event: "Sound level exceeded 70 dB threshold", node: "Node 01", type: "warning" },
-  ]);
+  // Industrial operational activity log (populated by live incoming events)
+  const [recentActivities, setRecentActivities] = useState([]);
 
-  const [lastMqttTime, setLastMqttTime] = useState(Date.now());
-  const [mqttEvents, setMqttEvents] = useState([
-    { id: "ev-1", node: "Node 01", status: "normal", time: "14:10:05" },
-    { id: "ev-2", node: "Node 02", status: "normal", time: "14:08:42" },
-    { id: "ev-3", node: "Node 03", status: "normal", time: "14:05:18" },
-  ]);
+  const [lastMqttTime, setLastMqttTime] = useState(null);
+  const [mqttEvents, setMqttEvents] = useState([]);
 
   const activeAlerts = alerts.filter((alert) => alert.state === "active");
   const resolvedAlerts = alerts.filter((alert) => alert.state === "resolved");
@@ -1906,13 +1882,15 @@ function AlertsOverTimeBarChart({ alerts = [] }) {
    ========================================================= */
 
 function RecentActivityPanel({ activities = [] }) {
-  const events = activities.length > 0 ? activities : [
-    { id: 1, time: "10:50:12", event: "MQTT telemetry heartbeat synchronized", node: "All Nodes", type: "system" },
-    { id: 2, time: "10:47:35", event: "Leak incident marked Resolved by Operator", node: "Node 02", type: "nominal" },
-    { id: 3, time: "10:45:00", event: "Automated SMS/Telegram alert notification sent", node: "Node 01", type: "info" },
-    { id: 4, time: "10:43:18", event: "High Acoustic Anomaly Alert created (88.5 dB)", node: "Node 01", type: "alert" },
-    { id: 5, time: "10:42:04", event: "Sound level exceeded 70 dB threshold", node: "Node 01", type: "warning" },
-  ];
+  const events = activities || [];
+
+  if (events.length === 0) {
+    return (
+      <div style={{ padding: "28px 16px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>
+        No operational activity recorded yet.
+      </div>
+    );
+  }
 
   return (
     <div className="iot-activity-timeline">
