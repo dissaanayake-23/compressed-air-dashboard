@@ -108,6 +108,11 @@ function App() {
   ]);
 
   const [lastMqttTime, setLastMqttTime] = useState(Date.now());
+  const [mqttEvents, setMqttEvents] = useState([
+    { id: "ev-1", node: "Node 01", status: "normal", time: "14:10:05" },
+    { id: "ev-2", node: "Node 02", status: "normal", time: "14:08:42" },
+    { id: "ev-3", node: "Node 03", status: "normal", time: "14:05:18" },
+  ]);
 
   const activeAlerts = alerts.filter((alert) => alert.state === "active");
   const resolvedAlerts = alerts.filter((alert) => alert.state === "resolved");
@@ -266,6 +271,18 @@ function App() {
           ...prev.slice(0, 49),
         ]);
       }
+
+      // Add to incoming real-time MQTT events feed
+      const eventTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      setMqttEvents((prev) => [
+        {
+          id: `ev-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          node: nodeId,
+          status: isLeak ? "leak" : "normal",
+          time: eventTime,
+        },
+        ...prev.slice(0, 11),
+      ]);
     };
 
     // 1. Connect to HiveMQ Public MQTT Broker over Secure WebSockets (WSS)
@@ -612,15 +629,9 @@ function App() {
             <Dashboard
               alerts={alerts}
               nodes={nodes}
-              soundLevel={soundLevel}
-              threshold={threshold}
               leakDetected={leakDetected}
               mqttTopic={MQTT_TOPIC}
-              loading={loading}
-              acousticHistory={acousticHistory}
-              nodeHistories={nodeHistories}
-              recentActivities={recentActivities}
-              lastMqttTime={lastMqttTime}
+              mqttEvents={mqttEvents}
               setActivePage={setActivePage}
             />
           </>
@@ -758,21 +769,30 @@ function SimplePageHeader({
    ========================================================= */
 
 /* =========================================================
-   DASHBOARD COMPONENT - INDUSTRIAL IOT MONITORING PLATFORM
+   DASHBOARD COMPONENT - CLEAN INDUSTRIAL ACOUSTIC MONITORING
    ========================================================= */
+
+function formatTimeAgo(isoOrDate) {
+  if (!isoOrDate) return "Just now";
+  try {
+    const d = new Date(isoOrDate);
+    if (isNaN(d.getTime())) return "Just now";
+    const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (diffSec < 15) return "Just now";
+    if (diffSec < 60) return `${diffSec}s ago`;
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "Just now";
+  }
+}
 
 function Dashboard({
   alerts = [],
   nodes = [],
-  soundLevel = null,
-  threshold = 70,
   leakDetected = false,
   mqttTopic = "acoustic-leak-detection/sensor-data",
-  loading = false,
-  acousticHistory = [],
-  nodeHistories = {},
-  recentActivities = [],
-  lastMqttTime = null,
+  mqttEvents = [],
   setActivePage,
 }) {
   const [selectedNodeDetails, setSelectedNodeDetails] = useState(null);
@@ -781,224 +801,245 @@ function Dashboard({
   const activeAlerts = alerts.filter((a) => a.state === "active").length;
   const resolvedAlerts = alerts.filter((a) => a.state === "resolved").length;
 
-  // Calculate system-wide average dB and peak dB
-  const validDbs = [
-    ...(soundLevel !== null ? [soundLevel] : []),
-    ...nodes.map((n) => parseFloat(n.soundLevel)).filter((v) => !isNaN(v) && v > 0),
-    ...acousticHistory.map((p) => p.db),
-  ];
-  const avgDb = validDbs.length > 0 ? validDbs.reduce((acc, v) => acc + v, 0) / validDbs.length : 62.4;
-  const peakDb = validDbs.length > 0 ? Math.max(...validDbs) : 88.5;
+  // Global system leak flag: active if any alert is active, leakDetected is true, or any node has status === "leak"
+  const isSystemLeak = leakDetected || activeAlerts > 0 || nodes.some((n) => n.status === "leak");
 
   return (
-    <div className="dashboard-industrial">
+    <div className="clean-dashboard">
 
       {/* ===================================================
-          1. TOP HERO ROW: ACOUSTIC STATUS CARD + LIVE TREND CHART
+          1. LIVE ACOUSTIC MONITORING BANNER
       =================================================== */}
-      <section className="iot-hero-row">
-        {/* Left (1/3): Hero Acoustic Meter */}
-        <AcousticStatusCard
-          soundLevel={soundLevel}
-          threshold={threshold}
-          leakDetected={leakDetected}
-          mqttTopic={mqttTopic}
-          lastMqttTime={lastMqttTime}
-          peakDb={peakDb}
-        />
+      <section className={`clean-live-banner ${isSystemLeak ? "has-leak" : "normal"}`}>
+        <div className="clean-banner-left">
+          <div className={`clean-banner-icon ${isSystemLeak ? "leak" : "normal"}`}>
+            <Activity size={24} />
+          </div>
+          <div>
+            <div className="clean-banner-tag">LIVE ACOUSTIC MONITORING</div>
+            <div className="clean-banner-title">
+              {isSystemLeak ? "Leak Anomaly Detected" : "System Nominal — No Leaks Active"}
+            </div>
+            <div className="clean-banner-desc">
+              {isSystemLeak
+                ? "Immediate inspection recommended on flagged pneumatic drop line."
+                : `Real-time monitoring active across ${nodes.length} connected detection nodes.`}
+            </div>
+          </div>
+        </div>
 
-        {/* Right (2/3): Live Acoustic Telemetry Trend Line Chart */}
-        <LiveAcousticTrendChart
-          data={acousticHistory}
-          threshold={threshold}
-          currentDb={soundLevel !== null ? soundLevel : 64.0}
-          leakDetected={leakDetected}
-        />
+        <div className="clean-banner-right">
+          <span className={`clean-banner-badge ${isSystemLeak ? "leak" : "normal"}`}>
+            <span className="clean-banner-dot" />
+            {isSystemLeak ? "LEAK DETECTED" : "ACOUSTIC NORMAL"}
+          </span>
+          <div className="clean-banner-topic" title={`MQTT Topic: ${mqttTopic}`}>
+            <Radio size={12} />
+            <span>Topic: {mqttTopic}</span>
+          </div>
+        </div>
       </section>
 
       {/* ===================================================
-          2. MONITORING SUMMARY KPI CARDS (5-COLUMN GRID)
+          2. SUMMARY CARDS
       =================================================== */}
-      <section className="iot-summary-grid">
-        <EnhancedSummaryCard
-          title="Total Alerts"
-          value={totalAlerts}
-          subtitle="Recorded lifetime events"
-          trend="+3.2%"
-          trendDir="up"
-          trendLabel="vs last hr"
-          icon={<Bell size={18} />}
-          sparkPoints={[2, 3, 3, 5, 4, 6, 7, 8]}
-          color="#2563eb"
-        />
+      <section className="clean-summary-grid">
+        <div className="clean-summary-card">
+          <div className="clean-summary-icon blue">
+            <Bell size={22} />
+          </div>
+          <div className="clean-summary-content">
+            <span className="clean-summary-label">Total Alerts</span>
+            <strong className="clean-summary-value">{totalAlerts}</strong>
+            <small className="clean-summary-sub">Recorded events</small>
+          </div>
+        </div>
 
-        <EnhancedSummaryCard
-          title="Active Alerts"
-          value={activeAlerts}
-          subtitle={activeAlerts > 0 ? "Requires attention" : "All systems nominal"}
-          trend={activeAlerts > 0 ? "HIGH" : "NOMINAL"}
-          trendDir={activeAlerts > 0 ? "danger" : "safe"}
-          trendLabel={activeAlerts > 0 ? "Immediate Action" : "0 unresolved"}
-          icon={<AlertTriangle size={18} />}
-          sparkPoints={activeAlerts > 0 ? [1, 1, 2, 3, 2, 4, activeAlerts, activeAlerts] : [0, 0, 0, 0, 0, 0, 0, 0]}
-          color={activeAlerts > 0 ? "#ef4444" : "#10b981"}
-          isAlert={activeAlerts > 0}
-        />
+        <div className={`clean-summary-card ${activeAlerts > 0 ? "has-active" : ""}`}>
+          <div className={`clean-summary-icon ${activeAlerts > 0 ? "red" : "orange"}`}>
+            <AlertTriangle size={22} />
+          </div>
+          <div className="clean-summary-content">
+            <span className="clean-summary-label">Active Alerts</span>
+            <strong className="clean-summary-value" style={{ color: activeAlerts > 0 ? "#dc2626" : "#0f172a" }}>
+              {activeAlerts}
+            </strong>
+            <small className="clean-summary-sub">
+              {activeAlerts > 0 ? "Require attention" : "All nodes nominal"}
+            </small>
+          </div>
+        </div>
 
-        <EnhancedSummaryCard
-          title="Resolved Alerts"
-          value={resolvedAlerts}
-          subtitle="Cleared incidents"
-          trend="100%"
-          trendDir="safe"
-          trendLabel="Resolution rate"
-          icon={<ShieldCheck size={18} />}
-          sparkPoints={[1, 2, 2, 4, 5, 5, 6, 8]}
-          color="#10b981"
-        />
+        <div className="clean-summary-card">
+          <div className="clean-summary-icon green">
+            <ShieldCheck size={22} />
+          </div>
+          <div className="clean-summary-content">
+            <span className="clean-summary-label">Resolved Alerts</span>
+            <strong className="clean-summary-value">{resolvedAlerts}</strong>
+            <small className="clean-summary-sub">Issues cleared</small>
+          </div>
+        </div>
 
-        <EnhancedSummaryCard
-          title="System Avg Sound"
-          value={`${avgDb.toFixed(1)} dB`}
-          subtitle={`Envelope baseline (${threshold} dB)`}
-          trend="-1.4%"
-          trendDir="safe"
-          trendLabel="vs baseline"
-          icon={<Volume2 size={18} />}
-          sparkPoints={[58, 60, 62, 65, 64, 63, 62, avgDb]}
-          color="#0ea5e9"
-        />
-
-        <EnhancedSummaryCard
-          title="Highest Reading Today"
-          value={`${peakDb.toFixed(1)} dB`}
-          subtitle="Peak acoustic amplitude"
-          trend={peakDb >= threshold ? "PEAK" : "OK"}
-          trendDir={peakDb >= threshold ? "danger" : "safe"}
-          trendLabel={peakDb >= threshold ? "Exceeded 70 dB" : "Under threshold"}
-          icon={<TrendingUp size={18} />}
-          sparkPoints={[52, 60, 68, 74, 82, 88.5, 80, peakDb]}
-          color={peakDb >= threshold ? "#f59e0b" : "#6366f1"}
-        />
+        <div className="clean-summary-card">
+          <div className="clean-summary-icon cyan">
+            <Cpu size={22} />
+          </div>
+          <div className="clean-summary-content">
+            <span className="clean-summary-label">Monitored Nodes</span>
+            <strong className="clean-summary-value">{nodes.length}</strong>
+            <small className="clean-summary-sub">Active hardware units</small>
+          </div>
+        </div>
       </section>
 
       {/* ===================================================
-          3. MIDDLE ROW: CONNECTED NODES (2/3) + ALERT SEVERITY DONUT (1/3)
+          3. MAIN CONTENT: CONNECTED NODES + RECENT EVENTS PANEL
       =================================================== */}
-      <section className="iot-middle-grid">
-        {/* Left: Connected Detection Nodes Comparison */}
-        <div className="iot-panel iot-nodes-panel">
-          <div className="iot-panel-header">
+      <section className="clean-main-split">
+
+        {/* LEFT COLUMN: CONNECTED DETECTION NODES */}
+        <div className="clean-nodes-col">
+          <div className="clean-section-header">
             <div>
-              <span className="iot-badge-tag">MONITORING NODES</span>
-              <h3>Connected Detection Nodes</h3>
-              <p>Real-time telemetry, signal health, and status for all active IoT sensors.</p>
+              <span className="clean-section-tag">MONITORING NODES</span>
+              <h3 className="clean-section-title">Connected Detection Nodes</h3>
+              <p className="clean-section-subtitle">Real-time leak status for all monitoring nodes across the system.</p>
             </div>
             {setActivePage && (
               <button
                 type="button"
-                className="iot-manage-nodes-btn"
+                className="clean-manage-btn"
                 onClick={() => setActivePage("nodes")}
               >
                 <Server size={14} />
-                Manage Nodes
+                <span>Manage Nodes</span>
               </button>
             )}
           </div>
 
           {nodes.length > 0 ? (
-            <div className="iot-nodes-grid">
+            <div className="clean-nodes-grid">
               {nodes.map((node) => {
-                const hasLeak = alerts.some((a) => a.node === node.id && a.state === "active");
-                const history = nodeHistories[node.id] || [52, 54, 58, 62, 70, 78, 85, 88.5];
+                const hasLeak = alerts.some((a) => a.node === node.id && a.state === "active") || node.status === "leak";
+                const lastUpdatedText = formatTimeAgo(node.lastSeen);
+
                 return (
-                  <ConnectedNodeCard
+                  <div
                     key={node.id}
-                    node={node}
-                    hasLeak={hasLeak}
-                    history={history}
-                    threshold={threshold}
-                    onViewDetails={() => setSelectedNodeDetails(node)}
-                  />
+                    className={`clean-node-card ${hasLeak ? "has-leak" : "normal"}`}
+                    onClick={() => setSelectedNodeDetails(node)}
+                  >
+                    <div className="clean-node-top">
+                      <div className={`clean-node-icon ${hasLeak ? "leak" : "normal"}`}>
+                        <Cpu size={18} />
+                      </div>
+
+                      <span className={`clean-node-badge ${hasLeak ? "leak" : "normal"}`}>
+                        <span className="clean-node-dot" />
+                        {hasLeak ? "LEAK DETECTED" : "NORMAL"}
+                      </span>
+                    </div>
+
+                    <div className="clean-node-body">
+                      <h4 className="clean-node-title">{node.name || node.id}</h4>
+                      <div className="clean-node-loc">
+                        <MapPin size={12} />
+                        <span>{node.location || "Default Zone"}</span>
+                      </div>
+                    </div>
+
+                    {/* Location Image preview if present */}
+                    {node.locationImage && (
+                      <div className="clean-node-img-preview">
+                        <img src={node.locationImage} alt={node.name} />
+                      </div>
+                    )}
+
+                    <div className="clean-node-footer">
+                      <div className="clean-node-state-row">
+                        <span className="clean-node-state-label">Status:</span>
+                        <strong className={hasLeak ? "text-leak" : "text-normal"}>
+                          {hasLeak ? "Leak Active" : "Normal"}
+                        </strong>
+                      </div>
+                      <div className="clean-node-time-row" title={node.lastSeen ? new Date(node.lastSeen).toLocaleString() : "Just now"}>
+                        <Clock size={11} />
+                        <span>{lastUpdatedText}</span>
+                      </div>
+                    </div>
+                  </div>
                 );
               })}
             </div>
           ) : (
-            <div className="iot-empty-nodes">
-              <Cpu size={36} />
-              <h4>No Monitoring Nodes Detected</h4>
-              <p>Detection units will stream in automatically when ESP32 microcontrollers publish to MQTT.</p>
+            <div className="clean-empty-nodes">
+              <Cpu size={32} />
+              <h4>No Monitoring Nodes Connected</h4>
+              <p>Hardware nodes will stream into this view as ESP32 microcontrollers publish MQTT telemetry.</p>
             </div>
           )}
         </div>
 
-        {/* Right: Alert Severity Donut Chart */}
-        <div className="iot-panel iot-severity-panel">
-          <div className="iot-panel-header">
-            <div>
-              <span className="iot-badge-tag">INCIDENT CLASSIFICATION</span>
-              <h3>Alert Severity Breakdown</h3>
-              <p>Severity distribution across registered events.</p>
+        {/* RIGHT COLUMN: RECENT MQTT EVENTS PANEL */}
+        <div className="clean-events-col">
+          <div className="clean-events-panel">
+            <div className="clean-events-header">
+              <div>
+                <span className="clean-section-tag">LIVE STREAM</span>
+                <h3 className="clean-events-title">Recent Events</h3>
+              </div>
+              <span className="clean-live-chip">
+                <span className="clean-pulse-dot" />
+                Live Feed
+              </span>
+            </div>
+
+            <div className="clean-events-list">
+              {mqttEvents && mqttEvents.length > 0 ? (
+                mqttEvents.slice(0, 8).map((ev) => {
+                  const isLeak = ev.status === "leak";
+                  return (
+                    <div key={ev.id} className={`clean-event-item ${isLeak ? "leak" : "normal"}`}>
+                      <div className={`clean-event-icon-circle ${isLeak ? "leak" : "normal"}`}>
+                        {isLeak ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}
+                      </div>
+                      <div className="clean-event-content">
+                        <div className="clean-event-row1">
+                          <strong className="clean-event-nodename">{ev.node}</strong>
+                          <span className={`clean-event-status-pill ${isLeak ? "leak" : "normal"}`}>
+                            {isLeak ? "LEAK" : "NORMAL"}
+                          </span>
+                        </div>
+                        <div className="clean-event-row2">
+                          <span>{isLeak ? "Leak Detected" : "Status Normal"}</span>
+                          <span className="clean-event-time">• {ev.time}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="clean-events-empty">
+                  <Radio size={22} />
+                  <p>Listening for incoming MQTT telemetry events...</p>
+                </div>
+              )}
+            </div>
+
+            <div className="clean-events-footer">
+              <Wifi size={12} />
+              <span>broker.hivemq.com (Active)</span>
             </div>
           </div>
-
-          <AlertSeverityDonutChart alerts={alerts} />
         </div>
+
       </section>
 
-      {/* ===================================================
-          4. BOTTOM ROW: ALERTS OVER TIME + ACTIVITY + SYSTEM HEALTH
-      =================================================== */}
-      <section className="iot-bottom-grid">
-        {/* Alerts Over Time (Hourly Bar Chart) */}
-        <div className="iot-panel iot-hourly-panel">
-          <div className="iot-panel-header">
-            <div>
-              <span className="iot-badge-tag">FREQUENCY TREND</span>
-              <h3>Alerts Over Time (24h)</h3>
-              <p>Hourly distribution of leak trigger events.</p>
-            </div>
-            <span className="iot-peak-pill">Peak: 14:00 (3 events)</span>
-          </div>
-
-          <AlertsOverTimeBarChart alerts={alerts} />
-        </div>
-
-        {/* Recent Activity Timeline */}
-        <div className="iot-panel iot-activity-panel">
-          <div className="iot-panel-header">
-            <div>
-              <span className="iot-badge-tag">OPERATIONAL LOG</span>
-              <h3>Recent System Activity</h3>
-              <p>Real-time event stream from nodes & broker.</p>
-            </div>
-          </div>
-
-          <RecentActivityPanel activities={recentActivities} />
-        </div>
-
-        {/* System Health Panel */}
-        <div className="iot-panel iot-health-panel">
-          <div className="iot-panel-header">
-            <div>
-              <span className="iot-badge-tag">INFRASTRUCTURE</span>
-              <h3>System & Broker Health</h3>
-              <p>Live gateway connectivity metrics.</p>
-            </div>
-          </div>
-
-          <SystemHealthCard
-            connectedNodesCount={nodes.length}
-            lastMqttTime={lastMqttTime}
-          />
-        </div>
-      </section>
-
-      {/* Node Details Modal */}
+      {/* Node Details Inspection Modal */}
       {selectedNodeDetails && (
         <NodeDetailsModal
           node={selectedNodeDetails}
-          threshold={threshold}
           onClose={() => setSelectedNodeDetails(null)}
           onNavigateToNodes={() => {
             setSelectedNodeDetails(null);
@@ -1886,11 +1927,10 @@ function SystemHealthCard({ connectedNodesCount = 3, lastMqttTime }) {
    9. NODE DETAILS MODAL
    ========================================================= */
 
-function NodeDetailsModal({ node, threshold = 70, onClose, onNavigateToNodes }) {
+function NodeDetailsModal({ node, onClose, onNavigateToNodes }) {
   if (!node) return null;
 
-  const currentSound = parseFloat(node.soundLevel) || (node.status === "leak" ? 88.5 : 54.0);
-  const isLeak = node.status === "leak" || currentSound >= threshold;
+  const isLeak = node.status === "leak";
 
   return (
     <div className="iot-modal-overlay" onClick={onClose}>
@@ -1902,7 +1942,7 @@ function NodeDetailsModal({ node, threshold = 70, onClose, onNavigateToNodes }) 
             </div>
             <div>
               <h3>{node.name || node.id}</h3>
-              <p>Node ID: <code>{node.id}</code> • Status: <span className={isLeak ? "text-danger" : "text-success"}>{isLeak ? "LEAK DETECTED" : "NOMINAL"}</span></p>
+              <p>Node ID: <code>{node.id}</code> • Status: <span className={isLeak ? "text-danger" : "text-success"}>{isLeak ? "LEAK DETECTED" : "NORMAL"}</span></p>
             </div>
           </div>
           <button type="button" className="modal-close-btn" onClick={onClose}>
@@ -1919,51 +1959,63 @@ function NodeDetailsModal({ node, threshold = 70, onClose, onNavigateToNodes }) 
             </div>
           )}
 
-          {/* Sound Level Big Gauge */}
-          <div className="modal-gauge-card">
-            <div className="modal-gauge-header">
-              <span>REAL-TIME ACOUSTIC AMPLITUDE</span>
-              <span className={`modal-status-chip ${isLeak ? "leak" : "normal"}`}>
-                {isLeak ? "CRITICAL THRESHOLD" : "OPERATIONAL"}
+          {/* Primary State Card */}
+          <div style={{
+            background: isLeak ? "#fff5f5" : "#f0fdf4",
+            border: isLeak ? "1.5px solid #fecaca" : "1.5px solid #bbf7d0",
+            borderRadius: "12px",
+            padding: "16px 20px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "16px",
+          }}>
+            <div>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                HARDWARE DETECTION STATUS
               </span>
+              <div style={{ fontSize: "20px", fontWeight: "800", color: isLeak ? "#dc2626" : "#16a34a", marginTop: "2px" }}>
+                {isLeak ? "LEAK ANOMALY ACTIVE" : "STATUS NORMAL (NO LEAK)"}
+              </div>
             </div>
-            <div className="modal-gauge-number">
-              <strong>{currentSound.toFixed(1)}</strong>
-              <span>dB</span>
-              <small>(Trigger Threshold: {threshold} dB)</small>
-            </div>
+            <span style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "6px 14px",
+              borderRadius: "20px",
+              fontSize: "12px",
+              fontWeight: "700",
+              background: isLeak ? "#ef4444" : "#10b981",
+              color: "#ffffff",
+            }}>
+              <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#fff" }} />
+              {isLeak ? "LEAK" : "NORMAL"}
+            </span>
           </div>
 
-          {/* Industrial Specs Grid */}
+          {/* Clean Hardware Specs Grid */}
           <div className="modal-specs-grid">
             <div className="spec-item">
-              <span className="spec-label">Transducer</span>
-              <strong>INMP441 MEMS Microphone</strong>
+              <span className="spec-label">Device Type</span>
+              <strong>Acoustic Leak Detector</strong>
             </div>
             <div className="spec-item">
-              <span className="spec-label">Sampling Bus</span>
-              <strong>I2S (44.1 kHz / 24-bit)</strong>
+              <span className="spec-label">Communication</span>
+              <strong>MQTT (broker.hivemq.com)</strong>
             </div>
             <div className="spec-item">
-              <span className="spec-label">Controller</span>
-              <strong>ESP32-WROOM-32 (240MHz)</strong>
+              <span className="spec-label">Location Zone</span>
+              <strong>{node.location || "Default Zone"}</strong>
             </div>
             <div className="spec-item">
-              <span className="spec-label">RF Signal</span>
-              <strong>WiFi -62 dBm (Excellent)</strong>
-            </div>
-            <div className="spec-item">
-              <span className="spec-label">Location</span>
-              <strong>{node.location || "Compressor Zone A"}</strong>
-            </div>
-            <div className="spec-item">
-              <span className="spec-label">Heartbeat Rate</span>
-              <strong>1.0 Hz (MQTT QOS 0)</strong>
+              <span className="spec-label">Last Telemetry</span>
+              <strong>{node.lastSeen ? new Date(node.lastSeen).toLocaleTimeString() : "Just now"}</strong>
             </div>
           </div>
 
           {node.description && (
-            <div className="modal-notes">
+            <div className="modal-notes" style={{ marginTop: "14px" }}>
               <span className="spec-label">Description / Notes</span>
               <p>{node.description}</p>
             </div>
