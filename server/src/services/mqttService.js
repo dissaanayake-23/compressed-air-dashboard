@@ -118,19 +118,31 @@ export function initMqtt(io) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Helper: Verify if node is registered
+//  Helper: Verify if node is registered (flexible matching "Node 01", "Node 1", "node01", etc.)
 // ─────────────────────────────────────────────────────────────────────────────
-async function isNodeRegistered(nodeId) {
-  if (!nodeId) return false;
+function normalizeNodeId(id) {
+  if (!id) return '';
+  const s = String(id).toLowerCase().replace(/[-_\s]/g, '');
+  return s.replace(/^node0*([0-9]+)$/, 'node$1');
+}
+
+function isSameNode(id1, id2) {
+  if (!id1 || !id2) return false;
+  if (String(id1).toLowerCase().trim() === String(id2).toLowerCase().trim()) return true;
+  return normalizeNodeId(id1) === normalizeNodeId(id2);
+}
+
+async function getRegisteredNode(nodeId) {
+  if (!nodeId) return null;
   try {
     if (isPostgresConnected) {
-      const res = await query('SELECT id FROM nodes WHERE LOWER(id) = LOWER($1)', [nodeId]);
-      return res.rows.length > 0;
+      const res = await query('SELECT * FROM nodes');
+      return res.rows.find(r => isSameNode(r.id, nodeId) || isSameNode(r.name, nodeId)) || null;
     }
-    return inMemoryStore.nodes.some(n => n.id.toLowerCase() === String(nodeId).toLowerCase());
+    return inMemoryStore.nodes.find(n => isSameNode(n.id, nodeId) || isSameNode(n.name, nodeId)) || null;
   } catch (err) {
     console.error('[MQTT] Error checking if node is registered:', err);
-    return false;
+    return null;
   }
 }
 
@@ -139,19 +151,20 @@ async function isNodeRegistered(nodeId) {
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleSensorReading(data) {
   // Support flexible node ID keys
-  const nodeId = data.nodeId || data.node_id || data.id || data.node;
+  const rawNodeId = data.nodeId || data.node_id || data.id || data.node;
 
-  if (!nodeId) {
+  if (!rawNodeId) {
     console.warn('[MQTT] Sensor reading missing nodeId:', data);
     return;
   }
 
   // Block message if node is not registered
-  const registered = await isNodeRegistered(nodeId);
-  if (!registered) {
-    console.warn(`🛑 [MQTT] Blocked message: Node "${nodeId}" is not registered.`);
+  const matchedNode = await getRegisteredNode(rawNodeId);
+  if (!matchedNode) {
+    console.warn(`🛑 [MQTT] Blocked message: Node "${rawNodeId}" is not registered.`);
     return;
   }
+  const nodeId = matchedNode.id;
 
   // Parse binary leak status from hardware (handles boolean true/false, "leak"/"normal", 1/0)
   const isLeak = data.leak !== undefined
@@ -184,15 +197,16 @@ async function handleSensorReading(data) {
 //  HANDLER: Node heartbeat  { nodeId, status, soundLevel }
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleNodeStatus(data, topic) {
-  const { nodeId, status = 'normal', soundLevel } = data;
-  if (!nodeId) return;
+  const { nodeId: rawNodeId, status = 'normal', soundLevel } = data;
+  if (!rawNodeId) return;
 
   // Block message if node is not registered
-  const registered = await isNodeRegistered(nodeId);
-  if (!registered) {
-    console.warn(`🛑 [MQTT] Blocked node status: Node "${nodeId}" is not registered.`);
+  const matchedNode = await getRegisteredNode(rawNodeId);
+  if (!matchedNode) {
+    console.warn(`🛑 [MQTT] Blocked node status: Node "${rawNodeId}" is not registered.`);
     return;
   }
+  const nodeId = matchedNode.id;
 
   try {
     // Update PostgreSQL node record
@@ -202,7 +216,7 @@ async function handleNodeStatus(data, topic) {
     );
   } catch {
     // In-memory fallback
-    const node = inMemoryStore.nodes.find(n => n.id.toLowerCase() === nodeId.toLowerCase());
+    const node = inMemoryStore.nodes.find(n => isSameNode(n.id, nodeId));
     if (node) {
       node.status = status;
       if (soundLevel !== undefined) node.sound_level = soundLevel;
@@ -218,15 +232,16 @@ async function handleNodeStatus(data, topic) {
 //  HANDLER: Alert event  { nodeId, title, severity, description, soundLevel }
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleAlertEvent(data) {
-  const { nodeId, title, severity = 'warning', description, soundLevel = 0, threshold = 70.0 } = data;
-  if (!nodeId) return;
+  const { nodeId: rawNodeId, title, severity = 'warning', description, soundLevel = 0, threshold = 70.0 } = data;
+  if (!rawNodeId) return;
 
   // Block message if node is not registered
-  const registered = await isNodeRegistered(nodeId);
-  if (!registered) {
-    console.warn(`🛑 [MQTT] Blocked alert event: Node "${nodeId}" is not registered.`);
+  const matchedNode = await getRegisteredNode(rawNodeId);
+  if (!matchedNode) {
+    console.warn(`🛑 [MQTT] Blocked alert event: Node "${rawNodeId}" is not registered.`);
     return;
   }
+  const nodeId = matchedNode.id;
 
   const alert = {
     id: `alert_${Date.now()}`,

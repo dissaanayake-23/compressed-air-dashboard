@@ -25,37 +25,51 @@ export async function getLatestSensor(req, res) {
   }
 }
 
+function normalizeNodeId(id) {
+  if (!id) return '';
+  const s = String(id).toLowerCase().replace(/[-_\s]/g, '');
+  return s.replace(/^node0*([0-9]+)$/, 'node$1');
+}
+
+function isSameNode(id1, id2) {
+  if (!id1 || !id2) return false;
+  if (String(id1).toLowerCase().trim() === String(id2).toLowerCase().trim()) return true;
+  return normalizeNodeId(id1) === normalizeNodeId(id2);
+}
+
 export async function ingestReading(req, res) {
   const body = req?.body || req || {};
-  const nodeId = body.nodeId || body.node_id || body.id || body.node;
+  const rawNodeId = body.nodeId || body.node_id || body.id || body.node;
 
-  if (!nodeId) {
+  if (!rawNodeId) {
     if (res && res.status) {
       return res.status(400).json({ error: 'nodeId is required' });
     }
     return;
   }
 
-  // If node is not registered, block that message
-  let isRegistered = false;
+  // Check if node is registered (flexible ID matching)
+  let matchedNode = null;
   try {
     if (isPostgresConnected && pool) {
-      const nodeCheck = await pool.query('SELECT id FROM nodes WHERE LOWER(id) = LOWER($1)', [nodeId]);
-      isRegistered = nodeCheck.rows.length > 0;
+      const nodeCheck = await pool.query('SELECT * FROM nodes');
+      matchedNode = nodeCheck.rows.find(r => isSameNode(r.id, rawNodeId) || isSameNode(r.name, rawNodeId));
     } else {
-      isRegistered = inMemoryStore.nodes.some(n => n.id.toLowerCase() === String(nodeId).toLowerCase());
+      matchedNode = inMemoryStore.nodes.find(n => isSameNode(n.id, rawNodeId) || isSameNode(n.name, rawNodeId));
     }
   } catch (err) {
     console.error('[Ingest] Error verifying node registration:', err);
   }
 
-  if (!isRegistered) {
-    console.warn(`🛑 [Ingest] Blocked reading: Node "${nodeId}" is not registered.`);
+  if (!matchedNode) {
+    console.warn(`🛑 [Ingest] Blocked reading: Node "${rawNodeId}" is not registered.`);
     if (res && res.status) {
-      return res.status(403).json({ error: `Node "${nodeId}" is not registered. Message blocked.` });
+      return res.status(403).json({ error: `Node "${rawNodeId}" is not registered. Message blocked.` });
     }
     return;
   }
+
+  const nodeId = matchedNode.id;
 
   // Parse binary leak status from hardware (handles boolean true/false, "leak"/"normal", 1/0, "true"/"false")
   const isLeak = body.leak !== undefined

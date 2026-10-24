@@ -32,8 +32,19 @@ import {
   PieChart,
   ArrowUpRight,
   Info,
-  RefreshCw,
 } from "lucide-react";
+
+export const normalizeNodeId = (id) => {
+  if (!id) return "";
+  const s = String(id).toLowerCase().replace(/[-_\s]/g, "");
+  return s.replace(/^node0*([0-9]+)$/, "node$1");
+};
+
+export const isSameNode = (id1, id2) => {
+  if (!id1 || !id2) return false;
+  if (String(id1).toLowerCase().trim() === String(id2).toLowerCase().trim()) return true;
+  return normalizeNodeId(id1) === normalizeNodeId(id2);
+};
 
 function App() {
   const [activePage, setActivePage] = useState("dashboard");
@@ -193,14 +204,15 @@ function App() {
       const nodeId = data.nodeId || data.node_id || data.id || data.node;
       if (!nodeId) return;
 
-      // If a node is not registered, block that message!
-      const isRegistered = nodesRef.current && nodesRef.current.some(
-        (n) => String(n.id).toLowerCase() === String(nodeId).toLowerCase()
+      // Check if node is registered (flexible ID matching: "Node 01", "Node 1", "node01", etc.)
+      const matchedNode = nodesRef.current && nodesRef.current.find(
+        (n) => isSameNode(n.id, nodeId) || isSameNode(n.name, nodeId)
       );
-      if (!isRegistered) {
+      if (!matchedNode) {
         console.warn(`🛑 [MQTT] Blocked message from unregistered node: "${nodeId}"`);
         return;
       }
+      const resolvedNodeId = matchedNode.id;
 
       const {
         soundLevel,
@@ -231,17 +243,17 @@ function App() {
           time: timeStr,
           db: numericSound,
           isLeak,
-          node: nodeId,
+          node: resolvedNodeId,
         };
         return [...prev, newPoint].slice(-30);
       });
 
       // Update node-specific sparkline history
       setNodeHistories((prev) => {
-        const curr = prev[nodeId] || [50, 52, 55, 58, 62];
+        const curr = prev[resolvedNodeId] || [50, 52, 55, 58, 62];
         return {
           ...prev,
-          [nodeId]: [...curr, numericSound].slice(-16),
+          [resolvedNodeId]: [...curr, numericSound].slice(-16),
         };
       });
 
@@ -253,7 +265,7 @@ function App() {
 
       // Update registered node's live data
       setNodes((currentNodes) => {
-        const existingIdx = currentNodes.findIndex((n) => String(n.id).toLowerCase() === String(nodeId).toLowerCase());
+        const existingIdx = currentNodes.findIndex((n) => isSameNode(n.id, resolvedNodeId));
         if (existingIdx === -1) return currentNodes;
 
         const updated = [...currentNodes];
@@ -272,13 +284,11 @@ function App() {
       if (isLeak) {
         const severity = alertInfo?.severity || (numericSound >= 85.0 ? "critical" : "warning");
         const title = alertInfo?.title || (severity === "critical" ? "Critical Air Leak" : "Air Leak Warning");
-        const description = alertInfo?.description || `High acoustic level detected: ${numericSound.toFixed(1)} dB on ${nodeId}`;
-        const targetNode = String(nodeId).toLowerCase();
+        const description = alertInfo?.description || `High acoustic level detected: ${numericSound.toFixed(1)} dB on ${resolvedNodeId}`;
 
         setAlerts((currentAlerts) => {
           const existingIdx = currentAlerts.findIndex((a) => {
-            const aNode = String(a.node || a.node_id || "").toLowerCase();
-            return aNode === targetNode && a.state === "active";
+            return isSameNode(a.node || a.node_id, resolvedNodeId) && a.state === "active";
           });
 
           if (existingIdx >= 0) {
@@ -286,7 +296,7 @@ function App() {
             const updated = [...currentAlerts];
             updated[existingIdx] = {
               ...updated[existingIdx],
-              node: nodeId,
+              node: resolvedNodeId,
               title,
               severity,
               soundLevel: numericSound,
@@ -301,7 +311,7 @@ function App() {
           // Create a new alert only if no active alert exists for this node
           const newAlert = {
             id: `alert-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            node: nodeId,
+            node: resolvedNodeId,
             title,
             severity,
             soundLevel: numericSound,
@@ -317,14 +327,14 @@ function App() {
 
         // Add history record only on transition / initial alert
         setHistoryRecords((prev) => {
-          const alreadyLogged = prev.some((h) => String(h.node).toLowerCase() === targetNode && h.status === "leak");
+          const alreadyLogged = prev.some((h) => isSameNode(h.node, resolvedNodeId) && h.status === "leak");
           if (alreadyLogged) return prev;
           const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
           return [
             {
               id: `h-${Date.now()}`,
               time: `Today, ${timeStr}`,
-              node: nodeId,
+              node: resolvedNodeId,
               event: "Leak Event Detected",
               status: "leak",
             },
@@ -2783,15 +2793,16 @@ function NodesPage({ nodes = [], setNodes, alerts = [], onDeleteNode, onRegister
             </div>
 
             {nodes.map((node) => {
-              const hasActiveLeak = alerts.some(
-                (a) => a.node === node.id && a.state === "active"
-              );
+              const hasActiveLeak =
+                node.status === "leak" ||
+                alerts.some(
+                  (a) => isSameNode(a.node || a.node_id, node.id) && a.state === "active"
+                );
               const lastSeenStr = node.lastSeen
-                ? new Date(node.lastSeen).toLocaleString([], {
-                  month: "short",
-                  day: "numeric",
+                ? new Date(node.lastSeen).toLocaleTimeString([], {
                   hour: "2-digit",
                   minute: "2-digit",
+                  second: "2-digit",
                 })
                 : "Never";
 
