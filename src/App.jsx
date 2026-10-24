@@ -603,39 +603,6 @@ function App() {
 
         </nav>
 
-        {/* BACKEND & HIVEMQ CONNECTION BADGE */}
-        <div style={{ marginTop: "auto", padding: "16px 20px" }}>
-          <div
-            style={{
-              padding: "10px 14px",
-              borderRadius: "10px",
-              background: backendStatus === "connected" ? "#ecfdf5" : "#fffbeb",
-              border: backendStatus === "connected" ? "1px solid #a7f3d0" : "1px solid #fde68a",
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-            }}
-          >
-            <span
-              style={{
-                width: "9px",
-                height: "9px",
-                borderRadius: "50%",
-                backgroundColor: backendStatus === "connected" ? "#10b981" : "#f59e0b",
-                boxShadow: backendStatus === "connected" ? "0 0 8px #10b981" : "none",
-              }}
-            />
-            <div style={{ lineHeight: 1.2 }}>
-              <div style={{ fontSize: "12px", fontWeight: "700", color: backendStatus === "connected" ? "#065f46" : "#92400e" }}>
-                {backendStatus === "connected" ? "HiveMQ MQTT Online" : "Connecting..."}
-              </div>
-              <div style={{ fontSize: "11px", color: backendStatus === "connected" ? "#047857" : "#b45309" }}>
-                {backendStatus === "connected" ? "broker.hivemq.com (Active)" : "Reconnecting to Broker"}
-              </div>
-            </div>
-          </div>
-        </div>
-
       </aside>
 
       {/* ===================================================
@@ -656,7 +623,7 @@ function App() {
               subtitle={
                 nodes.length > 0
                   ? `Real-time monitoring across ${nodes.length} connected detection node${nodes.length === 1 ? "" : "s"}.`
-                  : "Real-time acoustic monitoring platform. Listening for MQTT telemetry."
+                  : "Real-time acoustic monitoring and detection platform."
               }
               backendStatus={backendStatus}
             />
@@ -769,34 +736,6 @@ function SimplePageHeader({
         </p>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "6px 14px",
-            borderRadius: "20px",
-            fontSize: "12px",
-            fontWeight: "600",
-            background: backendStatus === "connected" ? "rgba(46, 204, 113, 0.12)" : "rgba(245, 158, 11, 0.12)",
-            color: backendStatus === "connected" ? "#27ae60" : "#d97706",
-            border: backendStatus === "connected" ? "1px solid rgba(46, 204, 113, 0.3)" : "1px solid rgba(245, 158, 11, 0.3)",
-          }}
-        >
-          <span
-            style={{
-              width: "8px",
-              height: "8px",
-              borderRadius: "50%",
-              backgroundColor: backendStatus === "connected" ? "#2ecc71" : "#f59e0b",
-              boxShadow: backendStatus === "connected" ? "0 0 8px #2ecc71" : "none",
-            }}
-          />
-          {backendStatus === "connected" ? "HiveMQ MQTT & Live Stream" : "Connecting..."}
-        </span>
-      </div>
-
     </header>
   );
 }
@@ -845,40 +784,7 @@ function Dashboard({
     <div className="clean-dashboard">
 
       {/* ===================================================
-          1. LIVE ACOUSTIC MONITORING BANNER
-      =================================================== */}
-      <section className={`clean-live-banner ${isSystemLeak ? "has-leak" : "normal"}`}>
-        <div className="clean-banner-left">
-          <div className={`clean-banner-icon ${isSystemLeak ? "leak" : "normal"}`}>
-            <Activity size={24} />
-          </div>
-          <div>
-            <div className="clean-banner-tag">LIVE ACOUSTIC MONITORING</div>
-            <div className="clean-banner-title">
-              {isSystemLeak ? "Leak Anomaly Detected" : "System Nominal — No Leaks Active"}
-            </div>
-            <div className="clean-banner-desc">
-              {isSystemLeak
-                ? "Immediate inspection recommended on flagged pneumatic drop line."
-                : `Real-time monitoring active across ${nodes.length} connected detection nodes.`}
-            </div>
-          </div>
-        </div>
-
-        <div className="clean-banner-right">
-          <span className={`clean-banner-badge ${isSystemLeak ? "leak" : "normal"}`}>
-            <span className="clean-banner-dot" />
-            {isSystemLeak ? "LEAK DETECTED" : "ACOUSTIC NORMAL"}
-          </span>
-          <div className="clean-banner-topic" title={`MQTT Topic: ${mqttTopic}`}>
-            <Radio size={12} />
-            <span>Topic: {mqttTopic}</span>
-          </div>
-        </div>
-      </section>
-
-      {/* ===================================================
-          2. SUMMARY CARDS
+          1. SUMMARY CARDS
       =================================================== */}
       <section className="clean-summary-grid">
         <div className="clean-summary-card">
@@ -1057,15 +963,10 @@ function Dashboard({
                 })
               ) : (
                 <div className="clean-events-empty">
-                  <Radio size={22} />
-                  <p>Listening for incoming MQTT telemetry events...</p>
+                  <Radio size={20} />
+                  <p>No recent events</p>
                 </div>
               )}
-            </div>
-
-            <div className="clean-events-footer">
-              <Wifi size={12} />
-              <span>broker.hivemq.com (Active)</span>
             </div>
           </div>
         </div>
