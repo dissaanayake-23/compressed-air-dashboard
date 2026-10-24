@@ -154,7 +154,7 @@ async function handleSensorReading(data) {
 
     // If leak detected, build + push alert
     if (leakDetected) {
-      const alert = buildAlert(nodeId, soundLevel, threshold);
+      const alert = buildAlert(nodeId, soundLevel, threshold, data.alert);
       ioRef?.emit('alert:new', alert);
     }
   } catch (err) {
@@ -243,15 +243,18 @@ async function handleAlertEvent(data) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Utility: build a consistent alert object
 // ─────────────────────────────────────────────────────────────────────────────
-function buildAlert(nodeId, soundLevel, threshold) {
+function buildAlert(nodeId, soundLevel, threshold, alertInfo) {
+  const severity = alertInfo?.severity || (soundLevel >= 85 ? 'critical' : 'warning');
+  const title = alertInfo?.title || (severity === 'critical' ? 'Critical Air Leak' : 'Air Leak Warning');
+  const description = alertInfo?.description || `High acoustic level detected: ${soundLevel.toFixed(1)} dB on ${nodeId}`;
   return {
     id: `alert_${Date.now()}`,
     node: nodeId,
-    title: 'Compressed Air Leak Detected',
-    severity: 'critical',
+    title,
+    severity,
     soundLevel: soundLevel || 0,
     threshold: threshold || 70,
-    description: `Acoustic compressed air leak detected on ${nodeId}`,
+    description,
     state: 'active',
     createdAt: new Date().toISOString(),
   };

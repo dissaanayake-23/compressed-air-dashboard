@@ -166,18 +166,27 @@ void connectMQTT() {
 //  PUBLISH — Single Topic Telemetry
 // ─────────────────────────────────────────────────────────────────────────────
 void publishTelemetry(float soundLevel, bool leakDetected) {
-  // Only send nodeId, leakDetected, and status
-  StaticJsonDocument<128> doc;
+  StaticJsonDocument<350> doc;
   doc["nodeId"]       = NODE_ID;
+  doc["soundLevel"]   = roundf(soundLevel * 10) / 10.0;
+  doc["threshold"]    = THRESHOLD_DB;
   doc["leakDetected"] = leakDetected;
   doc["status"]       = leakDetected ? "leak" : "normal";
 
-  char payload[128];
+  // If leak is detected, attach alert details directly in the payload
+  if (leakDetected) {
+    JsonObject alertDoc = doc.createNestedObject("alert");
+    alertDoc["title"]       = (soundLevel >= 85.0) ? "Critical Air Leak" : "Air Leak Warning";
+    alertDoc["severity"]    = (soundLevel >= 85.0) ? "critical" : "warning";
+    alertDoc["description"] = "High acoustic level detected: " + String(soundLevel, 1) + " dB on " + String(NODE_ID);
+  }
+
+  char payload[350];
   serializeJson(doc, payload);
 
   bool ok = mqttClient.publish(TOPIC_TELEMETRY, payload, false);
-  Serial.printf("[MQTT] %s | Node=%s | status=%s | leakDetected=%s | %s\n",
-    TOPIC_TELEMETRY, NODE_ID, leakDetected ? "leak" : "normal", leakDetected ? "true" : "false", ok ? "SENT" : "ERR");
+  Serial.printf("[MQTT] %s | Node=%s | sound=%.1f dB | leak=%s | %s\n",
+    TOPIC_TELEMETRY, NODE_ID, soundLevel, leakDetected ? "LEAK" : "OK", ok ? "SENT" : "ERR");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

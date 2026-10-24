@@ -102,12 +102,12 @@ function App() {
     setDeletedNodeIds(updated);
     try {
       localStorage.setItem("deleted_node_ids", JSON.stringify(updated));
-    } catch {}
+    } catch { }
 
     // Clean up any alerts tied to this deleted node
     setAlerts((currentAlerts) => {
       const filtered = currentAlerts.filter((a) => a.node !== nodeId);
-      try { localStorage.setItem("cached_alerts", JSON.stringify(filtered)); } catch {}
+      try { localStorage.setItem("cached_alerts", JSON.stringify(filtered)); } catch { }
       return filtered;
     });
   };
@@ -120,7 +120,7 @@ function App() {
     setDeletedNodeIds(updated);
     try {
       localStorage.setItem("deleted_node_ids", JSON.stringify(updated));
-    } catch {}
+    } catch { }
   };
 
   const [soundLevel, setSoundLevel] = useState(0);
@@ -188,7 +188,7 @@ function App() {
       const nodeId = data.nodeId || data.node_id || data.id || data.node;
       if (!nodeId) return;
 
-      // Fresh telemetry from hardware automatically clears any prior delete tombstone
+      // If user previously deleted this node, receiving fresh telemetry unblocks it
       if (deletedNodeIdsRef.current && deletedNodeIdsRef.current.has(String(nodeId).toLowerCase())) {
         deletedNodeIdsRef.current.delete(String(nodeId).toLowerCase());
         try {
@@ -204,7 +204,7 @@ function App() {
         status: rawStatus,
       } = data;
 
-      // Robust binary leak resolution for { nodeId, leakDetected, status }
+      // Robust binary leak resolution for both full and lightweight payloads
       const isLeak = rawLeak !== undefined
         ? (rawLeak === true || rawLeak === 1 || rawLeak === 'true' || rawLeak === 'leak' || rawLeak === 'LEAK')
         : (rawStatus === 'leak' || rawStatus === 'LEAK' || leak === true || leak === 1 || leak === 'leak' || (soundLevel !== undefined && soundLevel !== null && parseFloat(soundLevel) >= (parseFloat(itemThreshold) || 70.0)));
@@ -212,8 +212,7 @@ function App() {
       const hasRawSound = soundLevel !== undefined && soundLevel !== null && !isNaN(parseFloat(soundLevel));
       const numericThreshold = parseFloat(itemThreshold) || 70.0;
 
-      // When hardware sends only nodeId and leak/no-leak, assign representative operational acoustic amplitude
-      // (88.5 dB on leak anomaly, 54.0 dB on normal nominal baseline)
+      // Assign representative amplitude if soundLevel is missing
       const numericSound = hasRawSound ? parseFloat(soundLevel) : (isLeak ? 88.5 : 54.0);
 
       setSoundLevel(numericSound);
@@ -268,11 +267,11 @@ function App() {
         return updated;
       });
 
-      // If leak detected, create active alert (preventing spam duplicates)
+      // If leak detected, create or update active alert
       if (isLeak) {
-        const title = alertInfo?.title || "Compressed Air Leak Detected";
-        const severity = alertInfo?.severity || "critical";
-        const description = alertInfo?.description || `Acoustic leak detected on ${nodeId} (Binary Hardware Signal)`;
+        const severity = alertInfo?.severity || (numericSound >= 85.0 ? "critical" : "warning");
+        const title = alertInfo?.title || (severity === "critical" ? "Critical Air Leak" : "Air Leak Warning");
+        const description = alertInfo?.description || `High acoustic level detected: ${numericSound.toFixed(1)} dB on ${nodeId}`;
 
         setAlerts((currentAlerts) => {
           const existingIdx = currentAlerts.findIndex((a) => a.node === nodeId && a.state === "active");
@@ -280,7 +279,11 @@ function App() {
             const updated = [...currentAlerts];
             updated[existingIdx] = {
               ...updated[existingIdx],
+              title,
+              severity,
               soundLevel: numericSound,
+              threshold: numericThreshold,
+              description,
               createdAt: new Date().toISOString(),
             };
             try { localStorage.setItem("cached_alerts", JSON.stringify(updated)); } catch {}
@@ -358,8 +361,8 @@ function App() {
             "acoustic-leak-detection/sensor-data",
             "acoustic-leak-detection/telemetry",
             "acoustic-leak-detection/node/+",
-            "compressed-air/#",
-            "compressed-air/sensor"
+            "compressed-air/sensor",
+            "compressed-air/#"
           ];
           topicsToSub.forEach((t) => {
             mqttClient.subscribe(t, { qos: 0 }, (err) => {
@@ -435,7 +438,7 @@ function App() {
         .then((res) => {
           if (res?.sensor) processTelemetry(res.sensor);
         })
-        .catch(() => {});
+        .catch(() => { });
     }
 
     return () => {
@@ -480,12 +483,12 @@ function App() {
           const updatedNodes = currentNodes.map((n) =>
             n.id === resolvedNodeId ? { ...n, status: "normal" } : n
           );
-          try { localStorage.setItem("cached_nodes", JSON.stringify(updatedNodes)); } catch {}
+          try { localStorage.setItem("cached_nodes", JSON.stringify(updatedNodes)); } catch { }
           return updatedNodes;
         });
       }
 
-      try { localStorage.setItem("cached_alerts", JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem("cached_alerts", JSON.stringify(updated)); } catch { }
       return updated;
     });
 
@@ -532,7 +535,7 @@ function App() {
     const deletedAlert = alerts.find((a) => a.id === id);
     setAlerts((currentAlerts) => {
       const updated = currentAlerts.filter((alert) => alert.id !== id);
-      try { localStorage.setItem("cached_alerts", JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem("cached_alerts", JSON.stringify(updated)); } catch { }
       return updated;
     });
 
@@ -594,9 +597,8 @@ function App() {
             return (
               <button
                 key={item.id}
-                className={`nav-item ${
-                  activePage === item.id ? "active" : ""
-                }`}
+                className={`nav-item ${activePage === item.id ? "active" : ""
+                  }`}
                 onClick={() => setActivePage(item.id)}
               >
                 <Icon size={19} />
@@ -1389,9 +1391,8 @@ function LiveAcousticTrendChart({
               />
               {/* Tooltip Card */}
               <g
-                transform={`translate(${
-                  hoveredPoint.x > width - 120 ? hoveredPoint.x - 110 : hoveredPoint.x + 10
-                }, ${Math.max(padT, hoveredPoint.y - 45)})`}
+                transform={`translate(${hoveredPoint.x > width - 120 ? hoveredPoint.x - 110 : hoveredPoint.x + 10
+                  }, ${Math.max(padT, hoveredPoint.y - 45)})`}
               >
                 <rect
                   width="100"
@@ -2065,13 +2066,11 @@ function AlertsPage({
               <div
                 key={alert.id}
                 onClick={() => setSelectedAlert(alert)}
-                className={`alert-card ${
-                  selectedAlert?.id === alert.id ? "selected" : ""
-                } ${
-                  alert.state === "active"
+                className={`alert-card ${selectedAlert?.id === alert.id ? "selected" : ""
+                  } ${alert.state === "active"
                     ? "alert-active"
                     : "alert-resolved"
-                }`}
+                  }`}
               >
                 <div className="alert-icon">
                   {alert.state === "active" ? <AlertTriangle size={18} /> : <ShieldCheck size={18} />}
@@ -2086,11 +2085,10 @@ function AlertsPage({
 
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <div
-                    className={`status-badge ${
-                      alert.state === "active"
+                    className={`status-badge ${alert.state === "active"
                         ? "status-active"
                         : "status-resolved"
-                    }`}
+                      }`}
                   >
                     ● {alert.state === "active" ? "LEAK DETECTED" : "RESOLVED"}
                   </div>
@@ -2139,11 +2137,10 @@ function AlertsPage({
             </div>
 
             <div
-              className={`details-status ${
-                selectedAlert.state === "active"
+              className={`details-status ${selectedAlert.state === "active"
                   ? "details-active"
                   : "details-resolved"
-              }`}
+                }`}
             >
               <span>
                 {selectedAlert.state === "active" ? "⚠" : "✓"}
@@ -2299,9 +2296,8 @@ function HistoryPage({ historyRecords = [], nodes = [] }) {
                 <span className="history-event">{row.event}</span>
                 <span>
                   <span
-                    className={`node-status-badge ${
-                      isLeak ? "leak" : "normal"
-                    }`}
+                    className={`node-status-badge ${isLeak ? "leak" : "normal"
+                      }`}
                   >
                     <span className="node-status-dot"></span>
                     {isLeak ? "LEAK DETECTED" : "NORMAL"}
@@ -2550,7 +2546,7 @@ function NodesPage({ nodes = [], setNodes, alerts = [], onDeleteNode, onRegister
       const updated = current.filter((n) => n.id !== nodeId);
       try {
         localStorage.setItem("cached_nodes", JSON.stringify(updated));
-      } catch {}
+      } catch { }
       return updated;
     });
 
@@ -2759,11 +2755,11 @@ function NodesPage({ nodes = [], setNodes, alerts = [], onDeleteNode, onRegister
               );
               const lastSeenStr = node.lastSeen
                 ? new Date(node.lastSeen).toLocaleString([], {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
                 : "Never";
 
               return (

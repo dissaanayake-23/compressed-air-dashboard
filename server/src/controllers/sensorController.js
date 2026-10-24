@@ -36,17 +36,20 @@ export async function ingestReading(req, res) {
     return;
   }
 
-  // If node was previously in deleted list, receiving fresh reading unblocks it
+  // If node was explicitly deleted by user, do not resurrect it into database or store
   if (deletedNodeIds && deletedNodeIds.has(String(nodeId).toLowerCase())) {
-    deletedNodeIds.delete(String(nodeId).toLowerCase());
+    if (res && res.json) {
+      return res.json({ message: 'Ignored reading for deleted node' });
+    }
+    return;
   }
 
   // Parse binary leak status from hardware (handles boolean true/false, "leak"/"normal", 1/0, "true"/"false")
   const isLeak = body.leak !== undefined
     ? (body.leak === true || body.leak === 1 || body.leak === 'leak' || body.leak === 'true')
     : (body.leakDetected !== undefined
-        ? Boolean(body.leakDetected)
-        : (body.status === 'leak' || (body.soundLevel !== undefined && parseFloat(body.soundLevel) >= (parseFloat(body.threshold) || 70.0))));
+      ? Boolean(body.leakDetected)
+      : (body.status === 'leak' || (body.soundLevel !== undefined && parseFloat(body.soundLevel) >= (parseFloat(body.threshold) || 70.0))));
 
   const currentThreshold = latestReading?.threshold ?? inMemoryStore.settings?.threshold ?? 70.0;
   const numericThreshold = body.threshold !== undefined ? parseFloat(body.threshold) : currentThreshold;
@@ -91,8 +94,8 @@ export async function ingestReading(req, res) {
       // If leak detected, always create a new unique alert
       if (leakDetected) {
         const alertId = `alert${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        const title = "Compressed Air Leak Detected";
-        const desc = `Acoustic leak detected on ${nodeId}`;
+        const title = body.alert?.title || (status === "critical" ? "Critical Air Leak" : "Air Leak Warning");
+        const desc = body.alert?.description || `High acoustic level detected: ${numericSound} dB on ${nodeId}`;
 
         const newAlertRes = await pool.query(
           `INSERT INTO alerts (id, node_id, title, severity, sound_level, threshold, state, description, created_at)
@@ -145,13 +148,13 @@ export async function ingestReading(req, res) {
           id: alertId,
           node_id: nodeId,
           node: nodeId,
-          title: "Compressed Air Leak Detected",
-          severity: "critical",
+          title: body.alert?.title || (status === "critical" ? "Critical Air Leak" : "Air Leak Warning"),
+          severity: body.alert?.severity || status,
           sound_level: numericSound,
           soundLevel: numericSound,
           threshold: numericThreshold,
           state: "active",
-          description: `Acoustic leak detected on ${nodeId}`,
+          description: body.alert?.description || `High acoustic level detected: ${numericSound} dB on ${nodeId}`,
           created_at: new Date(),
           createdAt: new Date(),
         };
