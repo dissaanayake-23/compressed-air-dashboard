@@ -175,12 +175,6 @@ async function handleSensorReading(data) {
 
     // Real-time push to dashboard
     ioRef?.emit('sensor:update', { nodeId, soundLevel, threshold, leakDetected, isBinarySensor: true });
-
-    // If leak detected, build + push alert
-    if (leakDetected) {
-      const alert = buildAlert(nodeId, soundLevel, threshold, data.alert);
-      ioRef?.emit('alert:new', alert);
-    }
   } catch (err) {
     console.error('[MQTT] Error ingesting sensor reading:', err.message);
   }

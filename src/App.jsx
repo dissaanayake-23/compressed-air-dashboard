@@ -268,18 +268,25 @@ function App() {
         return updated;
       });
 
-      // If leak detected, create or update active alert
+      // If leak detected, update existing active alert for this node or create one if none exists
       if (isLeak) {
         const severity = alertInfo?.severity || (numericSound >= 85.0 ? "critical" : "warning");
         const title = alertInfo?.title || (severity === "critical" ? "Critical Air Leak" : "Air Leak Warning");
         const description = alertInfo?.description || `High acoustic level detected: ${numericSound.toFixed(1)} dB on ${nodeId}`;
+        const targetNode = String(nodeId).toLowerCase();
 
         setAlerts((currentAlerts) => {
-          const existingIdx = currentAlerts.findIndex((a) => a.node === nodeId && a.state === "active");
+          const existingIdx = currentAlerts.findIndex((a) => {
+            const aNode = String(a.node || a.node_id || "").toLowerCase();
+            return aNode === targetNode && a.state === "active";
+          });
+
           if (existingIdx >= 0) {
+            // Update existing active alert in place
             const updated = [...currentAlerts];
             updated[existingIdx] = {
               ...updated[existingIdx],
+              node: nodeId,
               title,
               severity,
               soundLevel: numericSound,
@@ -291,6 +298,7 @@ function App() {
             return updated;
           }
 
+          // Create a new alert only if no active alert exists for this node
           const newAlert = {
             id: `alert-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             node: nodeId,
@@ -307,18 +315,22 @@ function App() {
           return updated;
         });
 
-        // Add history record
-        const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-        setHistoryRecords((prev) => [
-          {
-            id: `h-${Date.now()}`,
-            time: `Today, ${timeStr}`,
-            node: nodeId,
-            event: "Leak Event Detected",
-            status: "leak",
-          },
-          ...prev.slice(0, 49),
-        ]);
+        // Add history record only on transition / initial alert
+        setHistoryRecords((prev) => {
+          const alreadyLogged = prev.some((h) => String(h.node).toLowerCase() === targetNode && h.status === "leak");
+          if (alreadyLogged) return prev;
+          const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+          return [
+            {
+              id: `h-${Date.now()}`,
+              time: `Today, ${timeStr}`,
+              node: nodeId,
+              event: "Leak Event Detected",
+              status: "leak",
+            },
+            ...prev.slice(0, 49),
+          ];
+        });
       }
 
       // Add to incoming real-time MQTT events feed
@@ -424,9 +436,29 @@ function App() {
           }
         });
         socket.on("alert:new", (newAlert) => {
+          if (!newAlert) return;
+          const targetNode = String(newAlert.node || newAlert.node_id || "").toLowerCase();
+
           setAlerts((currentAlerts) => {
-            if (currentAlerts.some((a) => a.id === newAlert.id)) return currentAlerts;
-            return [newAlert, ...currentAlerts];
+            const existingIdx = currentAlerts.findIndex((a) => {
+              if (a.id === newAlert.id) return true;
+              const aNode = String(a.node || a.node_id || "").toLowerCase();
+              return aNode === targetNode && a.state === "active";
+            });
+
+            let updated;
+            if (existingIdx >= 0) {
+              updated = [...currentAlerts];
+              updated[existingIdx] = {
+                ...updated[existingIdx],
+                ...newAlert,
+                node: newAlert.node || newAlert.node_id || updated[existingIdx].node,
+              };
+            } else {
+              updated = [newAlert, ...currentAlerts];
+            }
+            try { localStorage.setItem("cached_alerts", JSON.stringify(updated)); } catch {}
+            return updated;
           });
         });
       } catch (e) {
