@@ -146,47 +146,58 @@ function App() {
     const API_BASE = import.meta.env.VITE_API_URL || "";
     let mqttClient = null;
 
-    // Helper: Process incoming telemetry from ESP32 via MQTT (or fallback REST)
+    // Helper: Process incoming telemetry from ESP32 via MQTT (or fallback REST / Socket.io)
     const processTelemetry = (data) => {
       if (!data) return;
+
+      // Support any node ID key from hardware
+      const nodeId = data.nodeId || data.node_id || data.id || data.node || "Node 01";
       const {
-        nodeId = "Node 01",
         soundLevel,
         threshold: itemThreshold = 70,
+        leak,
         leakDetected: rawLeak,
         alert: alertInfo,
+        status: rawStatus,
       } = data;
 
-      const numericSound = soundLevel !== undefined && soundLevel !== null ? parseFloat(soundLevel) : null;
-      const numericThreshold = parseFloat(itemThreshold);
-      const isLeak = rawLeak !== undefined
-        ? Boolean(rawLeak)
-        : (numericSound !== null && numericSound >= numericThreshold);
+      // Robust binary leak resolution (handles boolean true/false, "leak"/"normal", 1/0, "true"/"false")
+      const isLeak = leak !== undefined
+        ? (leak === true || leak === 1 || leak === 'leak' || leak === 'true' || leak === 'LEAK')
+        : (rawLeak !== undefined
+            ? Boolean(rawLeak)
+            : (rawStatus === 'leak' || rawStatus === 'LEAK' || (soundLevel !== undefined && soundLevel !== null && parseFloat(soundLevel) >= (parseFloat(itemThreshold) || 70.0))));
 
-      if (numericSound !== null && !isNaN(numericSound)) {
-        setSoundLevel(numericSound);
+      const hasRawSound = soundLevel !== undefined && soundLevel !== null && !isNaN(parseFloat(soundLevel));
+      const numericThreshold = parseFloat(itemThreshold) || 70.0;
 
-        // Update rolling acoustic telemetry window
-        setAcousticHistory((prev) => {
-          const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-          const newPoint = {
-            time: timeStr,
-            db: numericSound,
-            isLeak,
-            node: nodeId,
-          };
-          return [...prev, newPoint].slice(-30);
-        });
+      // When hardware sends only nodeId and leak/no-leak, assign representative operational acoustic amplitude
+      // (88.5 dB on leak anomaly, 54.0 dB on normal nominal baseline)
+      const numericSound = hasRawSound ? parseFloat(soundLevel) : (isLeak ? 88.5 : 54.0);
 
-        // Update node-specific sparkline history
-        setNodeHistories((prev) => {
-          const curr = prev[nodeId] || [50, 52, 55, 58, 62];
-          return {
-            ...prev,
-            [nodeId]: [...curr, numericSound].slice(-16),
-          };
-        });
-      }
+      setSoundLevel(numericSound);
+
+      // Update rolling acoustic telemetry window
+      setAcousticHistory((prev) => {
+        const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        const newPoint = {
+          time: timeStr,
+          db: numericSound,
+          isLeak,
+          node: nodeId,
+        };
+        return [...prev, newPoint].slice(-30);
+      });
+
+      // Update node-specific sparkline history
+      setNodeHistories((prev) => {
+        const curr = prev[nodeId] || [50, 52, 55, 58, 62];
+        return {
+          ...prev,
+          [nodeId]: [...curr, numericSound].slice(-16),
+        };
+      });
+
       if (!isNaN(numericThreshold)) {
         setThreshold(numericThreshold);
       }
@@ -202,6 +213,7 @@ function App() {
           soundLevel: numericSound,
           status: isLeak ? "leak" : "normal",
           lastSeen: new Date().toISOString(),
+          isBinarySensor: !hasRawSound,
         };
 
         let updated;
@@ -217,9 +229,9 @@ function App() {
 
       // If leak detected, create active alert (preventing spam duplicates)
       if (isLeak) {
-        const title = alertInfo?.title || (numericSound !== null && numericSound >= numericThreshold + 15 ? "Critical Air Leak" : "Air Leak Warning");
-        const severity = alertInfo?.severity || (numericSound !== null && numericSound >= numericThreshold + 15 ? "critical" : "warning");
-        const description = alertInfo?.description || `Abnormal acoustic level reached ${numericSound ?? ""} dB (Threshold: ${numericThreshold} dB)`;
+        const title = alertInfo?.title || "Compressed Air Leak Detected";
+        const severity = alertInfo?.severity || "critical";
+        const description = alertInfo?.description || `Acoustic leak detected on ${nodeId} (Binary Hardware Signal)`;
 
         setAlerts((currentAlerts) => {
           const alreadyActive = currentAlerts.some((a) => a.node === nodeId && a.state === "active");
@@ -230,7 +242,7 @@ function App() {
             node: nodeId,
             title,
             severity,
-            soundLevel: numericSound ?? numericThreshold,
+            soundLevel: numericSound,
             threshold: numericThreshold,
             state: "active",
             description,
@@ -278,24 +290,29 @@ function App() {
           setBackendStatus("connected");
           setLoading(false);
 
-          mqttClient.subscribe(MQTT_TOPIC, { qos: 0 }, (err) => {
-            if (!err) {
-              console.log(`📡 [HiveMQ MQTT] Subscribed to topic: "${MQTT_TOPIC}"`);
-            } else {
-              console.error(`❌ [HiveMQ MQTT] Subscription error:`, err);
-            }
+          const topicsToSub = [
+            MQTT_TOPIC,
+            "acoustic-leak-detection/sensor-data",
+            "acoustic-leak-detection/telemetry",
+            "acoustic-leak-detection/node/+",
+            "compressed-air/sensor",
+            "compressed-air/#"
+          ];
+          topicsToSub.forEach((t) => {
+            mqttClient.subscribe(t, { qos: 0 }, (err) => {
+              if (err) console.error(`❌ [HiveMQ MQTT] Subscription error on ${t}:`, err);
+            });
           });
+          console.log(`📡 [HiveMQ MQTT] Subscribed to telemetry topics`);
         });
 
         mqttClient.on("message", (topic, payload) => {
-          if (topic === MQTT_TOPIC) {
-            try {
-              const data = JSON.parse(payload.toString());
-              console.log(`📥 [HiveMQ MQTT] Telemetry received on ${topic}:`, data);
-              processTelemetry(data);
-            } catch (err) {
-              console.warn("Could not parse MQTT JSON payload:", payload.toString());
-            }
+          try {
+            const data = JSON.parse(payload.toString());
+            console.log(`📥 [HiveMQ MQTT] Telemetry received on ${topic}:`, data);
+            processTelemetry(data);
+          } catch (err) {
+            console.warn("Could not parse MQTT JSON payload:", payload.toString());
           }
         });
 
@@ -318,8 +335,38 @@ function App() {
 
     connectHiveMQ();
 
-    // 2. Fallback REST API initial fetch if VITE_API_URL is configured
+    // 2. Connect to Socket.io backend if API_BASE is configured
+    let socket = null;
     if (API_BASE) {
+      try {
+        socket = io(API_BASE, { autoConnect: true });
+        socket.on("connect", () => {
+          console.log("🔌 [Socket.io] Connected to server backend");
+        });
+        socket.on("sensor:update", (reading) => {
+          console.log("📥 [Socket.io] sensor:update:", reading);
+          processTelemetry(reading);
+        });
+        socket.on("node:status", (statusUpdate) => {
+          if (statusUpdate?.id) {
+            processTelemetry({
+              nodeId: statusUpdate.id,
+              status: statusUpdate.status,
+              soundLevel: statusUpdate.soundLevel,
+            });
+          }
+        });
+        socket.on("alert:new", (newAlert) => {
+          setAlerts((currentAlerts) => {
+            if (currentAlerts.some((a) => a.id === newAlert.id)) return currentAlerts;
+            return [newAlert, ...currentAlerts];
+          });
+        });
+      } catch (e) {
+        console.warn("Socket.io connection error:", e);
+      }
+
+      // Initial REST API fetch
       fetch(`${API_BASE}/api/sensor/latest`)
         .then((r) => r.json())
         .then((res) => {
@@ -332,6 +379,9 @@ function App() {
       if (mqttClient) {
         console.log("🔌 [HiveMQ MQTT] Disconnecting...");
         mqttClient.end(true);
+      }
+      if (socket) {
+        socket.disconnect();
       }
     };
   }, [MQTT_BROKER, MQTT_TOPIC]);
@@ -973,7 +1023,7 @@ function AcousticStatusCard({
   lastMqttTime,
   peakDb = 88.5,
 }) {
-  const currentVal = soundLevel !== null ? soundLevel : 64.0;
+  const currentVal = soundLevel !== null ? soundLevel : (leakDetected ? 88.5 : 54.0);
   // Calculate percentage along 30 - 110 dB range
   const pct = Math.min(100, Math.max(0, ((currentVal - 30) / (110 - 30)) * 100));
   const thresholdPct = ((threshold - 30) / (110 - 30)) * 100;
@@ -983,7 +1033,7 @@ function AcousticStatusCard({
       <div className="hero-status-top">
         <div className="hero-status-tag">
           <Activity size={14} />
-          <span>ACOUSTIC INTENSITY</span>
+          <span>LEAK DETECTION STATUS</span>
         </div>
         <div className="hero-topic-chip" title={`MQTT Topic: ${mqttTopic}`}>
           <Radio size={12} />
@@ -993,10 +1043,12 @@ function AcousticStatusCard({
 
       <div className="hero-meter-center">
         <div className="hero-db-block">
-          <span className="hero-db-number">
-            {soundLevel !== null ? soundLevel.toFixed(1) : "88.5"}
+          <span className="hero-db-number" style={{ fontSize: "38px", letterSpacing: "-0.5px" }}>
+            {leakDetected ? "LEAK" : "NORMAL"}
           </span>
-          <span className="hero-db-unit">dB</span>
+          <span className="hero-db-unit" style={{ fontSize: "14px", fontWeight: 600, color: leakDetected ? "#ef4444" : "#10b981" }}>
+            ({currentVal.toFixed(1)} dB)
+          </span>
         </div>
 
         {/* Animated Audio Equalizer Visualizer */}
@@ -1013,11 +1065,11 @@ function AcousticStatusCard({
       <div className="hero-badge-row">
         <div className={`hero-status-pill ${leakDetected ? "leak" : "normal"}`}>
           <span className="hero-status-dot" />
-          {leakDetected ? "LEAK DETECTED" : "ACOUSTIC NORMAL"}
+          {leakDetected ? "LEAK ANOMALY DETECTED" : "NOMINAL — NO LEAK"}
         </div>
         <div className="hero-rate-pill">
-          <TrendingUp size={12} />
-          <span>+0.4 dB/s</span>
+          <ShieldCheck size={12} />
+          <span>Hardware Sensor Stream</span>
         </div>
       </div>
 
@@ -1511,10 +1563,14 @@ function ConnectedNodeCard({
       <div className="node-metric-section">
         <div className="node-metric-row">
           <div>
-            <span className="node-metric-label">SOUND LEVEL</span>
+            <span className="node-metric-label">STATUS / LEVEL</span>
             <div className="node-metric-val">
-              <strong>{currentSound.toFixed(1)}</strong>
-              <small>dB</small>
+              <strong style={{ color: hasLeak ? "#ef4444" : "#10b981", marginRight: "6px" }}>
+                {hasLeak ? "LEAK" : "NORMAL"}
+              </strong>
+              <small style={{ fontSize: "12px", color: "#64748b" }}>
+                ({currentSound.toFixed(1)} dB)
+              </small>
             </div>
           </div>
 
@@ -1833,8 +1889,8 @@ function SystemHealthCard({ connectedNodesCount = 3, lastMqttTime }) {
 function NodeDetailsModal({ node, threshold = 70, onClose, onNavigateToNodes }) {
   if (!node) return null;
 
-  const currentSound = parseFloat(node.soundLevel) || 88.5;
-  const isLeak = currentSound >= threshold;
+  const currentSound = parseFloat(node.soundLevel) || (node.status === "leak" ? 88.5 : 54.0);
+  const isLeak = node.status === "leak" || currentSound >= threshold;
 
   return (
     <div className="iot-modal-overlay" onClick={onClose}>

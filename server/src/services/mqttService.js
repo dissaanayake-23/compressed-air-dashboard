@@ -121,19 +121,36 @@ export function initMqtt(io) {
 //  HANDLER: Sensor reading  { nodeId, soundLevel, threshold, leakDetected }
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleSensorReading(data) {
-  const { nodeId, soundLevel, threshold = 70.0, leakDetected } = data;
+  // Support flexible node ID keys
+  const nodeId = data.nodeId || data.node_id || data.id || data.node;
 
-  if (!nodeId || soundLevel === undefined) {
-    console.warn('[MQTT] Sensor reading missing nodeId or soundLevel:', data);
+  if (!nodeId) {
+    console.warn('[MQTT] Sensor reading missing nodeId:', data);
     return;
   }
+
+  // Parse binary leak status from hardware (handles boolean true/false, "leak"/"normal", 1/0)
+  const isLeak = data.leak !== undefined
+    ? (data.leak === true || data.leak === 1 || data.leak === 'leak' || data.leak === 'true')
+    : (data.leakDetected !== undefined
+        ? Boolean(data.leakDetected)
+        : (data.status === 'leak'));
+
+  // If hardware does not send raw soundLevel, assign representative operational amplitude
+  // (88.5 dB during a leak trigger, 54.0 dB during normal envelope)
+  const soundLevel = data.soundLevel !== undefined && data.soundLevel !== null
+    ? parseFloat(data.soundLevel)
+    : (isLeak ? 88.5 : 54.0);
+
+  const threshold = parseFloat(data.threshold) || 70.0;
+  const leakDetected = isLeak;
 
   // Reuse the existing ingestReading controller
   try {
     await ingestReading({ nodeId, soundLevel, threshold, leakDetected });
 
     // Real-time push to dashboard
-    ioRef?.emit('sensor:update', { nodeId, soundLevel, threshold, leakDetected });
+    ioRef?.emit('sensor:update', { nodeId, soundLevel, threshold, leakDetected, isBinarySensor: true });
 
     // If leak detected, build + push alert
     if (leakDetected) {

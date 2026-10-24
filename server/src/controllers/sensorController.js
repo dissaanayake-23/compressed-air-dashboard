@@ -26,19 +26,30 @@ export async function getLatestSensor(req, res) {
 
 export async function ingestReading(req, res) {
   const body = req?.body || req || {};
-  const { nodeId, soundLevel, threshold } = body;
+  const nodeId = body.nodeId || body.node_id || body.id || body.node;
 
-  if (!nodeId || soundLevel === undefined || soundLevel === null) {
+  if (!nodeId) {
     if (res && res.status) {
-      return res.status(400).json({ error: 'nodeId and soundLevel are required' });
+      return res.status(400).json({ error: 'nodeId is required' });
     }
     return;
   }
 
-  const numericSound = parseFloat(soundLevel);
+  // Parse binary leak status from hardware (handles boolean true/false, "leak"/"normal", 1/0, "true"/"false")
+  const isLeak = body.leak !== undefined
+    ? (body.leak === true || body.leak === 1 || body.leak === 'leak' || body.leak === 'true')
+    : (body.leakDetected !== undefined
+        ? Boolean(body.leakDetected)
+        : (body.status === 'leak' || (body.soundLevel !== undefined && parseFloat(body.soundLevel) >= (parseFloat(body.threshold) || 70.0))));
+
   const currentThreshold = latestReading?.threshold ?? inMemoryStore.settings?.threshold ?? 70.0;
-  const numericThreshold = threshold !== undefined ? parseFloat(threshold) : currentThreshold;
-  const leakDetected = numericSound >= numericThreshold;
+  const numericThreshold = body.threshold !== undefined ? parseFloat(body.threshold) : currentThreshold;
+
+  // Sound level: use passed soundLevel if present, otherwise assign representative level (88.5 dB on leak, 54.0 dB on normal)
+  const hasRawSound = body.soundLevel !== undefined && body.soundLevel !== null && !isNaN(parseFloat(body.soundLevel));
+  const numericSound = hasRawSound ? parseFloat(body.soundLevel) : (isLeak ? 88.5 : 54.0);
+
+  const leakDetected = isLeak;
   const status = leakDetected ? (numericSound >= numericThreshold + 15 ? "critical" : "warning") : "normal";
   const now = Date.now();
 

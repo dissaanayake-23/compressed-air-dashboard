@@ -43,8 +43,9 @@ const char* MQTT_CLIENT_ID = "esp32-acoustic-leak-node01"; // unique per ESP32
 #define TOPIC_TELEMETRY "acoustic-leak-detection/sensor-data"
 
 // Node Identity & Acoustic Threshold
-const char* NODE_ID      = "Node 01";  // Change per device: Node 01, Node 02, etc.
-const float THRESHOLD_DB = 70.0;       // Leak threshold in dB
+const char* NODE_ID          = "Node 01";  // Change per device: Node 01, Node 02, etc.
+const float THRESHOLD_DB     = 70.0;       // Leak threshold in dB
+const bool  SEND_BINARY_ONLY = true;       // Set to true to send only { "nodeId": "Node 01", "leak": true/false }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  I2S PIN CONFIG (INMP441 Microphone)
@@ -167,26 +168,31 @@ void connectMQTT() {
 // ─────────────────────────────────────────────────────────────────────────────
 void publishTelemetry(float soundLevel, bool leakDetected) {
   StaticJsonDocument<350> doc;
-  doc["nodeId"]       = NODE_ID;
-  doc["soundLevel"]   = roundf(soundLevel * 10) / 10.0;
-  doc["threshold"]    = THRESHOLD_DB;
-  doc["leakDetected"] = leakDetected;
-  doc["status"]       = leakDetected ? "leak" : "normal";
+  doc["nodeId"] = NODE_ID;
+  doc["leak"]   = leakDetected;
 
-  // If leak is detected, attach alert details directly in the payload
-  if (leakDetected) {
-    JsonObject alertDoc = doc.createNestedObject("alert");
-    alertDoc["title"]       = (soundLevel >= 85.0) ? "Critical Air Leak" : "Air Leak Warning";
-    alertDoc["severity"]    = (soundLevel >= 85.0) ? "critical" : "warning";
-    alertDoc["description"] = "Acoustic level reached " + String(soundLevel, 1) + " dB (Threshold: " + String((int)THRESHOLD_DB) + " dB)";
+  // Include detailed acoustic telemetry if not in binary-only mode
+  if (!SEND_BINARY_ONLY) {
+    doc["soundLevel"]   = roundf(soundLevel * 10) / 10.0;
+    doc["threshold"]    = THRESHOLD_DB;
+    doc["leakDetected"] = leakDetected;
+    doc["status"]       = leakDetected ? "leak" : "normal";
+
+    // If leak is detected, attach alert details directly in the payload
+    if (leakDetected) {
+      JsonObject alertDoc = doc.createNestedObject("alert");
+      alertDoc["title"]       = (soundLevel >= 85.0) ? "Critical Air Leak" : "Air Leak Warning";
+      alertDoc["severity"]    = (soundLevel >= 85.0) ? "critical" : "warning";
+      alertDoc["description"] = "Acoustic level reached " + String(soundLevel, 1) + " dB (Threshold: " + String((int)THRESHOLD_DB) + " dB)";
+    }
   }
 
   char payload[350];
   serializeJson(doc, payload);
 
   bool ok = mqttClient.publish(TOPIC_TELEMETRY, payload, false);
-  Serial.printf("[MQTT] %s | Node=%s | dB=%.1f | leak=%s | %s\n",
-    TOPIC_TELEMETRY, NODE_ID, soundLevel, leakDetected ? "LEAK" : "OK", ok ? "SENT" : "ERR");
+  Serial.printf("[MQTT] %s | Node=%s | leak=%s | %s\n",
+    TOPIC_TELEMETRY, NODE_ID, leakDetected ? "LEAK" : "OK", ok ? "SENT" : "ERR");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
