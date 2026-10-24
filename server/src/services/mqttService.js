@@ -244,15 +244,14 @@ async function handleAlertEvent(data) {
 //  Utility: build a consistent alert object
 // ─────────────────────────────────────────────────────────────────────────────
 function buildAlert(nodeId, soundLevel, threshold) {
-  const severity = soundLevel >= 85 ? 'critical' : 'warning';
   return {
     id: `alert_${Date.now()}`,
     node: nodeId,
-    title: severity === 'critical' ? 'Critical Air Leak' : 'Air Leak Warning',
-    severity,
-    soundLevel,
-    threshold,
-    description: `Acoustic activity of ${soundLevel.toFixed(1)} dB exceeded ${threshold} dB threshold on ${nodeId}`,
+    title: 'Compressed Air Leak Detected',
+    severity: 'critical',
+    soundLevel: soundLevel || 0,
+    threshold: threshold || 70,
+    description: `Acoustic compressed air leak detected on ${nodeId}`,
     state: 'active',
     createdAt: new Date().toISOString(),
   };

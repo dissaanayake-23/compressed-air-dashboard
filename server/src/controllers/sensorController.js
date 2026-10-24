@@ -94,8 +94,8 @@ export async function ingestReading(req, res) {
       // If leak detected, always create a new unique alert
       if (leakDetected) {
         const alertId = `alert${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        const title = status === "critical" ? "Critical Air Leak" : "Air Leak Warning";
-        const desc = `Acoustic level reached ${numericSound} dB (Threshold: ${numericThreshold} dB)`;
+        const title = "Compressed Air Leak Detected";
+        const desc = `Acoustic leak detected on ${nodeId}`;
 
         const newAlertRes = await pool.query(
           `INSERT INTO alerts (id, node_id, title, severity, sound_level, threshold, state, description, created_at)
@@ -148,13 +148,13 @@ export async function ingestReading(req, res) {
           id: alertId,
           node_id: nodeId,
           node: nodeId,
-          title: status === "critical" ? "Critical Air Leak" : "Air Leak Warning",
-          severity: status,
+          title: "Compressed Air Leak Detected",
+          severity: "critical",
           sound_level: numericSound,
           soundLevel: numericSound,
           threshold: numericThreshold,
           state: "active",
-          description: `Acoustic level reached ${numericSound} dB (Threshold: ${numericThreshold} dB)`,
+          description: `Acoustic leak detected on ${nodeId}`,
           created_at: new Date(),
           createdAt: new Date(),
         };

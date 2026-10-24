@@ -201,12 +201,10 @@ function App() {
         status: rawStatus,
       } = data;
 
-      // Robust binary leak resolution (handles boolean true/false, "leak"/"normal", 1/0, "true"/"false")
-      const isLeak = leak !== undefined
-        ? (leak === true || leak === 1 || leak === 'leak' || leak === 'true' || leak === 'LEAK')
-        : (rawLeak !== undefined
-            ? Boolean(rawLeak)
-            : (rawStatus === 'leak' || rawStatus === 'LEAK' || (soundLevel !== undefined && soundLevel !== null && parseFloat(soundLevel) >= (parseFloat(itemThreshold) || 70.0))));
+      // Robust binary leak resolution for { nodeId, leakDetected, status }
+      const isLeak = rawLeak !== undefined
+        ? (rawLeak === true || rawLeak === 1 || rawLeak === 'true' || rawLeak === 'leak' || rawLeak === 'LEAK')
+        : (rawStatus === 'leak' || rawStatus === 'LEAK' || leak === true || leak === 1 || leak === 'leak' || (soundLevel !== undefined && soundLevel !== null && parseFloat(soundLevel) >= (parseFloat(itemThreshold) || 70.0)));
 
       const hasRawSound = soundLevel !== undefined && soundLevel !== null && !isNaN(parseFloat(soundLevel));
       const numericThreshold = parseFloat(itemThreshold) || 70.0;
