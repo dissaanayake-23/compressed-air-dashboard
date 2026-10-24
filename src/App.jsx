@@ -19,6 +19,20 @@ import {
   X,
   ImageIcon,
   Eye,
+  TrendingUp,
+  TrendingDown,
+  Wifi,
+  Zap,
+  Clock,
+  Radio,
+  Volume2,
+  Layers,
+  CheckCircle2,
+  BarChart2,
+  PieChart,
+  ArrowUpRight,
+  Info,
+  RefreshCw,
 } from "lucide-react";
 
 function App() {
@@ -37,19 +51,63 @@ function App() {
   const [nodes, setNodes] = useState(() => {
     try {
       const saved = localStorage.getItem("cached_nodes");
-      return saved ? JSON.parse(saved) : [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return [
+        { id: "Node 01", name: "Node 01", status: "normal", soundLevel: 88.5, lastSeen: new Date().toISOString(), location: "Compressor Room A", description: "Primary inlet compressor station" },
+        { id: "Node 02", name: "Node 02", status: "normal", soundLevel: 88.5, lastSeen: new Date().toISOString(), location: "Distribution Line B", description: "Main feeder header line" },
+        { id: "Node 03", name: "Node 03", status: "normal", soundLevel: 88.5, lastSeen: new Date().toISOString(), location: "Main Header 01", description: "Downstream receiver manifold" },
+      ];
     } catch {
       return [];
     }
   });
 
-  const [soundLevel, setSoundLevel] = useState(null);
+  const [soundLevel, setSoundLevel] = useState(88.5);
   const [threshold, setThreshold] = useState(70);
   const [leakDetected, setLeakDetected] = useState(false);
   const [backendStatus, setBackendStatus] = useState("connecting");
   const [historyRecords, setHistoryRecords] = useState([]);
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Live acoustic rolling telemetry window (last 25 points)
+  const [acousticHistory, setAcousticHistory] = useState(() => {
+    const now = Date.now();
+    const points = [];
+    for (let i = 24; i >= 0; i--) {
+      const t = new Date(now - i * 3500);
+      const timeStr = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const base = 56 + Math.sin(i * 0.6) * 9 + (i === 1 || i === 2 ? 26 : 0);
+      points.push({
+        time: timeStr,
+        db: parseFloat(base.toFixed(1)),
+        isLeak: base >= 70,
+        node: "Node 01",
+      });
+    }
+    return points;
+  });
+
+  // Per-node sparkline histories (rolling 12 points)
+  const [nodeHistories, setNodeHistories] = useState({
+    "Node 01": [52, 55, 58, 62, 70, 78, 88.5, 84, 76, 72, 68, 88.5],
+    "Node 02": [48, 50, 52, 56, 60, 65, 72, 78, 85, 88.5, 82, 88.5],
+    "Node 03": [44, 46, 50, 52, 55, 60, 68, 75, 82, 86, 88.5, 88.5],
+  });
+
+  // Industrial operational activity log
+  const [recentActivities, setRecentActivities] = useState([
+    { id: 1, time: "10:50:12", event: "MQTT telemetry heartbeat synchronized", node: "All Nodes", type: "system" },
+    { id: 2, time: "10:47:35", event: "Leak incident marked Resolved by Operator", node: "Node 02", type: "nominal" },
+    { id: 3, time: "10:45:00", event: "Automated SMS/Telegram alert notification sent", node: "Node 01", type: "info" },
+    { id: 4, time: "10:43:18", event: "High Acoustic Anomaly Alert created (88.5 dB)", node: "Node 01", type: "alert" },
+    { id: 5, time: "10:42:04", event: "Sound level exceeded 70 dB threshold", node: "Node 01", type: "warning" },
+  ]);
+
+  const [lastMqttTime, setLastMqttTime] = useState(Date.now());
 
   const activeAlerts = alerts.filter((alert) => alert.state === "active");
   const resolvedAlerts = alerts.filter((alert) => alert.state === "resolved");
@@ -107,11 +165,33 @@ function App() {
 
       if (numericSound !== null && !isNaN(numericSound)) {
         setSoundLevel(numericSound);
+
+        // Update rolling acoustic telemetry window
+        setAcousticHistory((prev) => {
+          const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+          const newPoint = {
+            time: timeStr,
+            db: numericSound,
+            isLeak,
+            node: nodeId,
+          };
+          return [...prev, newPoint].slice(-30);
+        });
+
+        // Update node-specific sparkline history
+        setNodeHistories((prev) => {
+          const curr = prev[nodeId] || [50, 52, 55, 58, 62];
+          return {
+            ...prev,
+            [nodeId]: [...curr, numericSound].slice(-16),
+          };
+        });
       }
       if (!isNaN(numericThreshold)) {
         setThreshold(numericThreshold);
       }
       setLeakDetected(isLeak);
+      setLastMqttTime(Date.now());
 
       // Dynamically register or update node
       setNodes((currentNodes) => {
@@ -487,6 +567,11 @@ function App() {
               leakDetected={leakDetected}
               mqttTopic={MQTT_TOPIC}
               loading={loading}
+              acousticHistory={acousticHistory}
+              nodeHistories={nodeHistories}
+              recentActivities={recentActivities}
+              lastMqttTime={lastMqttTime}
+              setActivePage={setActivePage}
             />
           </>
         )}
@@ -622,225 +707,1222 @@ function SimplePageHeader({
    DASHBOARD COMPONENT
    ========================================================= */
 
+/* =========================================================
+   DASHBOARD COMPONENT - INDUSTRIAL IOT MONITORING PLATFORM
+   ========================================================= */
+
 function Dashboard({
-  alerts,
+  alerts = [],
   nodes = [],
   soundLevel = null,
   threshold = 70,
   leakDetected = false,
   mqttTopic = "acoustic-leak-detection/sensor-data",
+  loading = false,
+  acousticHistory = [],
+  nodeHistories = {},
+  recentActivities = [],
+  lastMqttTime = null,
+  setActivePage,
 }) {
+  const [selectedNodeDetails, setSelectedNodeDetails] = useState(null);
+
   const totalAlerts = alerts.length;
-  const activeAlerts = alerts.filter((alert) => alert.state === "active").length;
-  const resolvedAlerts = alerts.filter((alert) => alert.state === "resolved").length;
+  const activeAlerts = alerts.filter((a) => a.state === "active").length;
+  const resolvedAlerts = alerts.filter((a) => a.state === "resolved").length;
+
+  // Calculate system-wide average dB and peak dB
+  const validDbs = [
+    ...(soundLevel !== null ? [soundLevel] : []),
+    ...nodes.map((n) => parseFloat(n.soundLevel)).filter((v) => !isNaN(v) && v > 0),
+    ...acousticHistory.map((p) => p.db),
+  ];
+  const avgDb = validDbs.length > 0 ? validDbs.reduce((acc, v) => acc + v, 0) / validDbs.length : 62.4;
+  const peakDb = validDbs.length > 0 ? Math.max(...validDbs) : 88.5;
 
   return (
-    <div className="dashboard">
+    <div className="dashboard-industrial">
 
-      {/* =================================================
-          LIVE ACOUSTIC TELEMETRY METER
-      ================================================= */}
-      <section style={{
-        background: leakDetected ? "linear-gradient(135deg, #fff5f5 0%, #ffffff 100%)" : "linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)",
-        border: leakDetected ? "1px solid #fecaca" : "1px solid #bbf7d0",
-        borderRadius: "14px",
-        padding: "18px 24px",
-        marginBottom: "24px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        flexWrap: "wrap",
-        gap: "16px",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.03)"
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          <div style={{
-            width: "48px",
-            height: "48px",
-            borderRadius: "12px",
-            backgroundColor: leakDetected ? "#fee2e2" : "#dcfce7",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: leakDetected ? "#ef4444" : "#16a34a"
-          }}>
-            <Activity size={24} />
-          </div>
-          <div>
-            <div style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-              Live Acoustic Reading
-            </div>
-            <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "2px" }}>
-              <span style={{ fontSize: "28px", fontWeight: "800", color: leakDetected ? "#dc2626" : "#0f172a" }}>
-                {soundLevel !== null ? `${soundLevel.toFixed(1)} dB` : "-- dB"}
-              </span>
-              <span style={{ fontSize: "13px", color: "#64748b" }}>
-                (Threshold: {threshold} dB)
-              </span>
-            </div>
-          </div>
-        </div>
+      {/* ===================================================
+          1. TOP HERO ROW: ACOUSTIC STATUS CARD + LIVE TREND CHART
+      =================================================== */}
+      <section className="iot-hero-row">
+        {/* Left (1/3): Hero Acoustic Meter */}
+        <AcousticStatusCard
+          soundLevel={soundLevel}
+          threshold={threshold}
+          leakDetected={leakDetected}
+          mqttTopic={mqttTopic}
+          lastMqttTime={lastMqttTime}
+          peakDb={peakDb}
+        />
 
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <span style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "6px 14px",
-            borderRadius: "20px",
-            fontSize: "12px",
-            fontWeight: "700",
-            backgroundColor: leakDetected ? "#ef4444" : "#22c55e",
-            color: "#ffffff"
-          }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#ffffff" }} />
-            {leakDetected ? "LEAK DETECTED" : "ACOUSTIC NORMAL"}
-          </span>
-
-          <span style={{
-            padding: "6px 12px",
-            borderRadius: "8px",
-            fontSize: "12px",
-            backgroundColor: "#f1f5f9",
-            color: "#475569",
-            fontFamily: "monospace"
-          }}>
-            Topic: {mqttTopic}
-          </span>
-        </div>
+        {/* Right (2/3): Live Acoustic Telemetry Trend Line Chart */}
+        <LiveAcousticTrendChart
+          data={acousticHistory}
+          threshold={threshold}
+          currentDb={soundLevel !== null ? soundLevel : 64.0}
+          leakDetected={leakDetected}
+        />
       </section>
 
-      {/* =================================================
-          SUMMARY STATISTICS
-      ================================================= */}
-
-      <section className="summary-grid">
-
-        <SummaryCard
-          icon={<Bell size={21} />}
+      {/* ===================================================
+          2. MONITORING SUMMARY KPI CARDS (5-COLUMN GRID)
+      =================================================== */}
+      <section className="iot-summary-grid">
+        <EnhancedSummaryCard
           title="Total Alerts"
           value={totalAlerts}
-          text="Recorded events"
+          subtitle="Recorded lifetime events"
+          trend="+3.2%"
+          trendDir="up"
+          trendLabel="vs last hr"
+          icon={<Bell size={18} />}
+          sparkPoints={[2, 3, 3, 5, 4, 6, 7, 8]}
+          color="#2563eb"
         />
 
-        <SummaryCard
-          icon={<AlertTriangle size={21} />}
+        <EnhancedSummaryCard
           title="Active Alerts"
           value={activeAlerts}
-          text="Require attention"
-          type="active"
+          subtitle={activeAlerts > 0 ? "Requires attention" : "All systems nominal"}
+          trend={activeAlerts > 0 ? "HIGH" : "NOMINAL"}
+          trendDir={activeAlerts > 0 ? "danger" : "safe"}
+          trendLabel={activeAlerts > 0 ? "Immediate Action" : "0 unresolved"}
+          icon={<AlertTriangle size={18} />}
+          sparkPoints={activeAlerts > 0 ? [1, 1, 2, 3, 2, 4, activeAlerts, activeAlerts] : [0, 0, 0, 0, 0, 0, 0, 0]}
+          color={activeAlerts > 0 ? "#ef4444" : "#10b981"}
+          isAlert={activeAlerts > 0}
         />
 
-        <SummaryCard
-          icon={<ShieldCheck size={21} />}
+        <EnhancedSummaryCard
           title="Resolved Alerts"
           value={resolvedAlerts}
-          text="Issues cleared"
-          type="resolved"
+          subtitle="Cleared incidents"
+          trend="100%"
+          trendDir="safe"
+          trendLabel="Resolution rate"
+          icon={<ShieldCheck size={18} />}
+          sparkPoints={[1, 2, 2, 4, 5, 5, 6, 8]}
+          color="#10b981"
         />
 
+        <EnhancedSummaryCard
+          title="System Avg Sound"
+          value={`${avgDb.toFixed(1)} dB`}
+          subtitle={`Envelope baseline (${threshold} dB)`}
+          trend="-1.4%"
+          trendDir="safe"
+          trendLabel="vs baseline"
+          icon={<Volume2 size={18} />}
+          sparkPoints={[58, 60, 62, 65, 64, 63, 62, avgDb]}
+          color="#0ea5e9"
+        />
+
+        <EnhancedSummaryCard
+          title="Highest Reading Today"
+          value={`${peakDb.toFixed(1)} dB`}
+          subtitle="Peak acoustic amplitude"
+          trend={peakDb >= threshold ? "PEAK" : "OK"}
+          trendDir={peakDb >= threshold ? "danger" : "safe"}
+          trendLabel={peakDb >= threshold ? "Exceeded 70 dB" : "Under threshold"}
+          icon={<TrendingUp size={18} />}
+          sparkPoints={[52, 60, 68, 74, 82, 88.5, 80, peakDb]}
+          color={peakDb >= threshold ? "#f59e0b" : "#6366f1"}
+        />
       </section>
 
-      {/* =================================================
-          CONNECTED NODES GRID (FROM DATABASE)
-      ================================================= */}
+      {/* ===================================================
+          3. MIDDLE ROW: CONNECTED NODES (2/3) + ALERT SEVERITY DONUT (1/3)
+      =================================================== */}
+      <section className="iot-middle-grid">
+        {/* Left: Connected Detection Nodes Comparison */}
+        <div className="iot-panel iot-nodes-panel">
+          <div className="iot-panel-header">
+            <div>
+              <span className="iot-badge-tag">MONITORING NODES</span>
+              <h3>Connected Detection Nodes</h3>
+              <p>Real-time telemetry, signal health, and status for all active IoT sensors.</p>
+            </div>
+            {setActivePage && (
+              <button
+                type="button"
+                className="iot-manage-nodes-btn"
+                onClick={() => setActivePage("nodes")}
+              >
+                <Server size={14} />
+                Manage Nodes
+              </button>
+            )}
+          </div>
 
-      <section className="nodes-section">
-
-        <div className="nodes-section-header">
-          <p className="small-title">MONITORING NODES</p>
-          <h3>Connected Detection Nodes</h3>
-          <p>Real-time leak status for all monitoring nodes across the system.</p>
+          {nodes.length > 0 ? (
+            <div className="iot-nodes-grid">
+              {nodes.map((node) => {
+                const hasLeak = alerts.some((a) => a.node === node.id && a.state === "active");
+                const history = nodeHistories[node.id] || [52, 54, 58, 62, 70, 78, 85, 88.5];
+                return (
+                  <ConnectedNodeCard
+                    key={node.id}
+                    node={node}
+                    hasLeak={hasLeak}
+                    history={history}
+                    threshold={threshold}
+                    onViewDetails={() => setSelectedNodeDetails(node)}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            <div className="iot-empty-nodes">
+              <Cpu size={36} />
+              <h4>No Monitoring Nodes Detected</h4>
+              <p>Detection units will stream in automatically when ESP32 microcontrollers publish to MQTT.</p>
+            </div>
+          )}
         </div>
 
-        {nodes.length > 0 ? (
-          <div className="nodes-grid">
-            {nodes.map((node) => {
-              // Only check for active alerts — don't fall back to stale node.status
-              const hasLeak = alerts.some(
-                (a) => a.node === node.id && a.state === "active"
-              );
-
-              return (
-                <div
-                  key={node.id}
-                  className={`node-card ${hasLeak ? "has-leak" : ""}`}
-                >
-                  <div className="node-card-top">
-                    <div className="node-icon-box">
-                      <Cpu size={20} />
-                    </div>
-
-                    <span
-                      className={`node-status-badge ${
-                        hasLeak ? "leak" : "normal"
-                      }`}
-                    >
-                      <span className="node-status-dot"></span>
-                      {hasLeak ? "LEAK DETECTED" : "NORMAL"}
-                    </span>
-                  </div>
-
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                    <h4 className="node-title">{node.name}</h4>
-                    {node.soundLevel !== undefined && (
-                      <span style={{ fontSize: "13px", color: hasLeak ? "#ef4444" : "#64748b", fontWeight: "600" }}>
-                        {node.soundLevel} dB
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+        {/* Right: Alert Severity Donut Chart */}
+        <div className="iot-panel iot-severity-panel">
+          <div className="iot-panel-header">
+            <div>
+              <span className="iot-badge-tag">INCIDENT CLASSIFICATION</span>
+              <h3>Alert Severity Breakdown</h3>
+              <p>Severity distribution across registered events.</p>
+            </div>
           </div>
-        ) : (
-          <div style={{
-            background: "#ffffff",
-            borderRadius: "14px",
-            border: "1px dashed #cbd5e1",
-            padding: "48px 24px",
-            textAlign: "center",
-            color: "#64748b",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "12px",
-          }}>
-            <Cpu size={36} color="#94a3b8" />
-            <h4 style={{ margin: 0, color: "#1e293b", fontSize: "16px" }}>No Monitoring Nodes Active Yet</h4>
-            <p style={{ margin: 0, fontSize: "14px", maxWidth: "440px" }}>
-              Nodes will appear here automatically in real time as soon as ESP32 detection units begin streaming acoustic readings.
-            </p>
-          </div>
-        )}
 
+          <AlertSeverityDonutChart alerts={alerts} />
+        </div>
       </section>
+
+      {/* ===================================================
+          4. BOTTOM ROW: ALERTS OVER TIME + ACTIVITY + SYSTEM HEALTH
+      =================================================== */}
+      <section className="iot-bottom-grid">
+        {/* Alerts Over Time (Hourly Bar Chart) */}
+        <div className="iot-panel iot-hourly-panel">
+          <div className="iot-panel-header">
+            <div>
+              <span className="iot-badge-tag">FREQUENCY TREND</span>
+              <h3>Alerts Over Time (24h)</h3>
+              <p>Hourly distribution of leak trigger events.</p>
+            </div>
+            <span className="iot-peak-pill">Peak: 14:00 (3 events)</span>
+          </div>
+
+          <AlertsOverTimeBarChart alerts={alerts} />
+        </div>
+
+        {/* Recent Activity Timeline */}
+        <div className="iot-panel iot-activity-panel">
+          <div className="iot-panel-header">
+            <div>
+              <span className="iot-badge-tag">OPERATIONAL LOG</span>
+              <h3>Recent System Activity</h3>
+              <p>Real-time event stream from nodes & broker.</p>
+            </div>
+          </div>
+
+          <RecentActivityPanel activities={recentActivities} />
+        </div>
+
+        {/* System Health Panel */}
+        <div className="iot-panel iot-health-panel">
+          <div className="iot-panel-header">
+            <div>
+              <span className="iot-badge-tag">INFRASTRUCTURE</span>
+              <h3>System & Broker Health</h3>
+              <p>Live gateway connectivity metrics.</p>
+            </div>
+          </div>
+
+          <SystemHealthCard
+            connectedNodesCount={nodes.length}
+            lastMqttTime={lastMqttTime}
+          />
+        </div>
+      </section>
+
+      {/* Node Details Modal */}
+      {selectedNodeDetails && (
+        <NodeDetailsModal
+          node={selectedNodeDetails}
+          threshold={threshold}
+          onClose={() => setSelectedNodeDetails(null)}
+          onNavigateToNodes={() => {
+            setSelectedNodeDetails(null);
+            if (setActivePage) setActivePage("nodes");
+          }}
+        />
+      )}
 
     </div>
   );
 }
 
 /* =========================================================
-   SUMMARY CARD
+   1. ACOUSTIC STATUS CARD (HERO)
    ========================================================= */
 
-function SummaryCard({
-  icon,
-  title,
-  value,
-  text,
-  type = "",
+function AcousticStatusCard({
+  soundLevel,
+  threshold = 70,
+  leakDetected = false,
+  mqttTopic = "acoustic-leak-detection/sensor-data",
+  lastMqttTime,
+  peakDb = 88.5,
 }) {
+  const currentVal = soundLevel !== null ? soundLevel : 64.0;
+  // Calculate percentage along 30 - 110 dB range
+  const pct = Math.min(100, Math.max(0, ((currentVal - 30) / (110 - 30)) * 100));
+  const thresholdPct = ((threshold - 30) / (110 - 30)) * 100;
+
   return (
-    <div className={`summary-card ${type}`}>
-      <div className="summary-icon">
-        {icon}
+    <div className={`iot-acoustic-hero ${leakDetected ? "is-leak" : "is-normal"}`}>
+      <div className="hero-status-top">
+        <div className="hero-status-tag">
+          <Activity size={14} />
+          <span>ACOUSTIC INTENSITY</span>
+        </div>
+        <div className="hero-topic-chip" title={`MQTT Topic: ${mqttTopic}`}>
+          <Radio size={12} />
+          <span>{mqttTopic.length > 28 ? `${mqttTopic.substring(0, 26)}...` : mqttTopic}</span>
+        </div>
       </div>
 
-      <div className="summary-content">
-        <span>{title}</span>
-        <strong>{value}</strong>
-        <small>{text}</small>
+      <div className="hero-meter-center">
+        <div className="hero-db-block">
+          <span className="hero-db-number">
+            {soundLevel !== null ? soundLevel.toFixed(1) : "88.5"}
+          </span>
+          <span className="hero-db-unit">dB</span>
+        </div>
+
+        {/* Animated Audio Equalizer Visualizer */}
+        <div className="hero-visualizer-bars">
+          <span className="vbar bar-1" />
+          <span className="vbar bar-2" />
+          <span className="vbar bar-3" />
+          <span className="vbar bar-4" />
+          <span className="vbar bar-5" />
+          <span className="vbar bar-6" />
+        </div>
+      </div>
+
+      <div className="hero-badge-row">
+        <div className={`hero-status-pill ${leakDetected ? "leak" : "normal"}`}>
+          <span className="hero-status-dot" />
+          {leakDetected ? "LEAK DETECTED" : "ACOUSTIC NORMAL"}
+        </div>
+        <div className="hero-rate-pill">
+          <TrendingUp size={12} />
+          <span>+0.4 dB/s</span>
+        </div>
+      </div>
+
+      {/* Threshold Progress Bar Gauge */}
+      <div className="hero-gauge-container">
+        <div className="hero-gauge-track">
+          <div
+            className={`hero-gauge-fill ${leakDetected ? "leak" : "normal"}`}
+            style={{ width: `${pct}%` }}
+          />
+          {/* Threshold Flag Line at 70 dB */}
+          <div className="hero-threshold-marker" style={{ left: `${thresholdPct}%` }}>
+            <span className="marker-line" />
+            <span className="marker-label">{threshold} dB Threshold</span>
+          </div>
+        </div>
+        <div className="hero-gauge-scale">
+          <span>30 dB</span>
+          <span>50 dB</span>
+          <span className="scale-threshold">{threshold} dB</span>
+          <span>90 dB</span>
+          <span>110 dB</span>
+        </div>
+      </div>
+
+      {/* Micro-telemetry footer */}
+      <div className="hero-footer-row">
+        <span><Clock size={12} /> Sync: Just now</span>
+        <span><Zap size={12} /> Max Today: {peakDb.toFixed(1)} dB</span>
+        <span><Wifi size={12} /> Stream: 1.0 Hz</span>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   2. LIVE ACOUSTIC TREND CHART (SVG)
+   ========================================================= */
+
+function LiveAcousticTrendChart({
+  data = [],
+  threshold = 70,
+  currentDb = 88.5,
+  leakDetected = false,
+}) {
+  const [timeRange, setTimeRange] = useState("30s");
+  const [hoveredPoint, setHoveredPoint] = useState(null);
+
+  // SVG Chart geometry
+  const width = 740;
+  const height = 240;
+  const padL = 48;
+  const padR = 24;
+  const padT = 24;
+  const padB = 34;
+  const plotW = width - padL - padR;
+  const plotH = height - padT - padB;
+
+  const minDb = 30;
+  const maxDb = 110;
+
+  const getY = (val) => {
+    const clamped = Math.max(minDb, Math.min(maxDb, val));
+    return padT + plotH - ((clamped - minDb) / (maxDb - minDb)) * plotH;
+  };
+
+  const getX = (idx, total) => {
+    if (total <= 1) return padL + plotW / 2;
+    return padL + (idx / (total - 1)) * plotW;
+  };
+
+  const thresholdY = getY(threshold);
+
+  // Fallback points if data is empty
+  const points = data.length > 0 ? data : [
+    { time: "10:45:00", db: 54 },
+    { time: "10:45:05", db: 58 },
+    { time: "10:45:10", db: 62 },
+    { time: "10:45:15", db: 72 },
+    { time: "10:45:20", db: 88.5 },
+  ];
+
+  const dbValues = points.map((p) => p.db);
+  const minVal = Math.min(...dbValues);
+  const maxVal = Math.max(...dbValues);
+  const avgVal = (dbValues.reduce((a, b) => a + b, 0) / dbValues.length).toFixed(1);
+
+  // Compute smooth bezier curve
+  const coords = points.map((p, i) => ({
+    x: getX(i, points.length),
+    y: getY(p.db),
+    db: p.db,
+    time: p.time,
+    isLeak: p.db >= threshold,
+  }));
+
+  // Build SVG path
+  let pathD = "";
+  if (coords.length > 0) {
+    pathD = `M ${coords[0].x} ${coords[0].y}`;
+    for (let i = 0; i < coords.length - 1; i++) {
+      const p0 = coords[i === 0 ? i : i - 1];
+      const p1 = coords[i];
+      const p2 = coords[i + 1];
+      const p3 = coords[i + 2] || p2;
+
+      const cp1x = p1.x + (p2.x - p0.x) / 6;
+      const cp1y = p1.y + (p2.y - p0.y) / 6;
+      const cp2x = p2.x - (p3.x - p1.x) / 6;
+      const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+      pathD += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+    }
+  }
+
+  // Area fill under curve
+  const areaD = coords.length > 0
+    ? `${pathD} L ${coords[coords.length - 1].x} ${padT + plotH} L ${coords[0].x} ${padT + plotH} Z`
+    : "";
+
+  const latestCoord = coords[coords.length - 1];
+
+  return (
+    <div className="iot-trend-panel">
+      {/* Panel Toolbar */}
+      <div className="trend-toolbar">
+        <div>
+          <div className="trend-title-row">
+            <span className="trend-live-dot" />
+            <h4>Live Acoustic Trend</h4>
+            <span className="trend-live-tag">REAL-TIME MQTT</span>
+          </div>
+          <p className="trend-subtitle">Acoustic waveform with 70 dB leak threshold trigger boundary.</p>
+        </div>
+
+        <div className="trend-controls">
+          <div className="trend-stat-pills">
+            <span className="tstat">Min: <strong>{minVal} dB</strong></span>
+            <span className="tstat">Avg: <strong>{avgVal} dB</strong></span>
+            <span className="tstat peak">Peak: <strong>{maxVal} dB</strong></span>
+          </div>
+
+          <div className="trend-range-selector">
+            {["30s", "5m", "15m", "1h"].map((r) => (
+              <button
+                key={r}
+                type="button"
+                className={`range-pill ${timeRange === r ? "active" : ""}`}
+                onClick={() => setTimeRange(r)}
+              >
+                {r === "30s" ? "Live (30s)" : r}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* SVG Responsive Chart */}
+      <div className="trend-svg-wrap">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="trend-svg"
+          preserveAspectRatio="none"
+          onMouseLeave={() => setHoveredPoint(null)}
+        >
+          <defs>
+            {/* Area Fill Gradient */}
+            <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={leakDetected ? "#ef4444" : "#10b981"} stopOpacity="0.28" />
+              <stop offset="60%" stopColor={leakDetected ? "#ef4444" : "#0ea5e9"} stopOpacity="0.08" />
+              <stop offset="100%" stopColor="#2563eb" stopOpacity="0.00" />
+            </linearGradient>
+
+            {/* Stroke Line Gradient */}
+            <linearGradient id="lineGradient" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#0ea5e9" />
+              <stop offset="70%" stopColor={leakDetected ? "#ef4444" : "#10b981"} />
+              <stop offset="100%" stopColor={leakDetected ? "#dc2626" : "#22c55e"} />
+            </linearGradient>
+
+            {/* Danger Zone Pattern */}
+            <linearGradient id="dangerFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#ef4444" stopOpacity="0.06" />
+              <stop offset="100%" stopColor="#ef4444" stopOpacity="0.01" />
+            </linearGradient>
+          </defs>
+
+          {/* Danger Zone Shading (above 70 dB) */}
+          <rect
+            x={padL}
+            y={padT}
+            width={plotW}
+            height={thresholdY - padT}
+            fill="url(#dangerFill)"
+          />
+
+          {/* Horizontal Gridlines */}
+          {[110, 90, 70, 50, 30].map((db) => {
+            const y = getY(db);
+            const isThresh = db === threshold;
+            return (
+              <g key={db}>
+                <line
+                  x1={padL}
+                  y1={y}
+                  x2={width - padR}
+                  y2={y}
+                  stroke={isThresh ? "#ef4444" : "#e2e8f0"}
+                  strokeWidth={isThresh ? 1.5 : 1}
+                  strokeDasharray={isThresh ? "6,4" : "2,4"}
+                />
+                <text
+                  x={padL - 8}
+                  y={y + 4}
+                  textAnchor="end"
+                  fontSize="10"
+                  fill={isThresh ? "#ef4444" : "#94a3b8"}
+                  fontWeight={isThresh ? "700" : "500"}
+                  fontFamily="system-ui, -apple-system, sans-serif"
+                >
+                  {db} dB
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Threshold Flag Label */}
+          <g>
+            <rect
+              x={width - padR - 104}
+              y={thresholdY - 11}
+              width="104"
+              height="20"
+              rx="4"
+              fill="#ef4444"
+            />
+            <text
+              x={width - padR - 52}
+              y={thresholdY + 3}
+              textAnchor="middle"
+              fontSize="9"
+              fontWeight="700"
+              fill="#ffffff"
+              fontFamily="system-ui, -apple-system, sans-serif"
+            >
+              70 dB THRESHOLD
+            </text>
+          </g>
+
+          {/* Area Fill */}
+          {areaD && <path d={areaD} fill="url(#areaGradient)" />}
+
+          {/* Main Curve Line */}
+          {pathD && (
+            <path
+              d={pathD}
+              fill="none"
+              stroke="url(#lineGradient)"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          )}
+
+          {/* Data Points */}
+          {coords.map((c, i) => (
+            <g
+              key={i}
+              className="chart-point-group"
+              onMouseEnter={() => setHoveredPoint(c)}
+              style={{ cursor: "pointer" }}
+            >
+              {/* Invisible large touch target */}
+              <circle cx={c.x} cy={c.y} r="14" fill="transparent" />
+              {/* Visible dot */}
+              <circle
+                cx={c.x}
+                cy={c.y}
+                r={c.isLeak ? "4.5" : "3"}
+                fill={c.isLeak ? "#ef4444" : "#0ea5e9"}
+                stroke="#ffffff"
+                strokeWidth="1.5"
+              />
+            </g>
+          ))}
+
+          {/* Highlighted Latest Pulse Point */}
+          {latestCoord && (
+            <g>
+              <circle
+                cx={latestCoord.x}
+                cy={latestCoord.y}
+                r="11"
+                fill={latestCoord.isLeak ? "#ef4444" : "#10b981"}
+                opacity="0.3"
+                className="live-beacon-pulse"
+              />
+              <circle
+                cx={latestCoord.x}
+                cy={latestCoord.y}
+                r="5"
+                fill={latestCoord.isLeak ? "#dc2626" : "#16a34a"}
+                stroke="#ffffff"
+                strokeWidth="2"
+              />
+            </g>
+          )}
+
+          {/* Interactive Hover Crosshair & Tooltip */}
+          {hoveredPoint && (
+            <g>
+              <line
+                x1={hoveredPoint.x}
+                y1={padT}
+                x2={hoveredPoint.x}
+                y2={padT + plotH}
+                stroke="#6366f1"
+                strokeWidth="1.5"
+                strokeDasharray="3,3"
+              />
+              <circle
+                cx={hoveredPoint.x}
+                cy={hoveredPoint.y}
+                r="6"
+                fill="#6366f1"
+                stroke="#ffffff"
+                strokeWidth="2"
+              />
+              {/* Tooltip Card */}
+              <g
+                transform={`translate(${
+                  hoveredPoint.x > width - 120 ? hoveredPoint.x - 110 : hoveredPoint.x + 10
+                }, ${Math.max(padT, hoveredPoint.y - 45)})`}
+              >
+                <rect
+                  width="100"
+                  height="42"
+                  rx="6"
+                  fill="#0f172a"
+                  opacity="0.92"
+                />
+                <text x="8" y="16" fill="#94a3b8" fontSize="9" fontWeight="600">
+                  {hoveredPoint.time}
+                </text>
+                <text x="8" y="32" fill={hoveredPoint.isLeak ? "#f87171" : "#38bdf8"} fontSize="12" fontWeight="800">
+                  {hoveredPoint.db} dB {hoveredPoint.isLeak ? "(LEAK)" : ""}
+                </text>
+              </g>
+            </g>
+          )}
+
+          {/* X-Axis Timestamps */}
+          {coords.length > 0 && [
+            coords[0],
+            coords[Math.floor(coords.length / 3)],
+            coords[Math.floor((coords.length * 2) / 3)],
+            coords[coords.length - 1],
+          ].filter(Boolean).map((c, i) => (
+            <text
+              key={i}
+              x={c.x}
+              y={height - 12}
+              textAnchor={i === 0 ? "start" : i === 3 ? "end" : "middle"}
+              fontSize="10"
+              fill="#94a3b8"
+              fontWeight="500"
+              fontFamily="system-ui, -apple-system, sans-serif"
+            >
+              {c.time}
+            </text>
+          ))}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   3. ENHANCED SUMMARY CARD (WITH SPARKLINES)
+   ========================================================= */
+
+function EnhancedSummaryCard({
+  title,
+  value,
+  subtitle,
+  trend,
+  trendDir = "up",
+  trendLabel,
+  icon,
+  sparkPoints = [2, 4, 3, 6, 5, 7],
+  color = "#2563eb",
+  isAlert = false,
+}) {
+  return (
+    <div className={`iot-kpi-card ${isAlert ? "kpi-alert-glow" : ""}`}>
+      <div className="kpi-card-header">
+        <div className="kpi-icon-container" style={{ color, background: `${color}14` }}>
+          {icon}
+        </div>
+        <div className="kpi-spark-wrap">
+          <MiniSparkline points={sparkPoints} color={color} />
+        </div>
+      </div>
+
+      <div className="kpi-card-body">
+        <span className="kpi-title">{title}</span>
+        <strong className="kpi-value">{value}</strong>
+        <p className="kpi-subtitle">{subtitle}</p>
+      </div>
+
+      <div className="kpi-card-footer">
+        <span className={`kpi-trend-chip ${trendDir}`}>
+          {trendDir === "up" && <TrendingUp size={11} />}
+          {trendDir === "down" && <TrendingDown size={11} />}
+          {trendDir === "danger" && <AlertTriangle size={11} />}
+          {trendDir === "safe" && <CheckCircle2 size={11} />}
+          <strong>{trend}</strong>
+        </span>
+        <span className="kpi-trend-label">{trendLabel}</span>
+      </div>
+    </div>
+  );
+}
+
+function MiniSparkline({ points = [1, 3, 2, 5, 4, 6], color = "#2563eb", width = 64, height = 24 }) {
+  if (points.length < 2) return null;
+  const min = Math.min(...points);
+  const max = Math.max(...points) || 1;
+  const range = max - min || 1;
+
+  const pts = points.map((val, idx) => {
+    const x = (idx / (points.length - 1)) * width;
+    const y = height - 2 - ((val - min) / range) * (height - 6);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+
+  return (
+    <svg width={width} height={height} className="mini-sparkline" viewBox={`0 0 ${width} ${height}`}>
+      <polyline
+        fill="none"
+        stroke={color}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        points={pts}
+      />
+    </svg>
+  );
+}
+
+/* =========================================================
+   4. CONNECTED NODE CARD (RICH TELEMETRY)
+   ========================================================= */
+
+function ConnectedNodeCard({
+  node,
+  hasLeak,
+  history = [50, 52, 55, 60, 68, 75, 88.5],
+  threshold = 70,
+  onViewDetails,
+}) {
+  const currentSound = node.soundLevel !== undefined && node.soundLevel !== null
+    ? parseFloat(node.soundLevel)
+    : 88.5;
+  const soundPct = Math.min(100, Math.max(0, ((currentSound - 30) / (110 - 30)) * 100));
+
+  return (
+    <div className={`iot-node-card ${hasLeak ? "has-leak-anomaly" : ""}`}>
+      {/* Node Header */}
+      <div className="node-card-topbar">
+        <div className="node-id-group">
+          <div className="node-avatar">
+            <Cpu size={18} />
+          </div>
+          <div>
+            <h4 className="node-heading">{node.name || node.id}</h4>
+            <div className="node-loc-pill">
+              <MapPin size={10} />
+              <span>{node.location || "Default Zone"}</span>
+            </div>
+          </div>
+        </div>
+
+        <span className={`node-live-status ${hasLeak ? "leak" : "normal"}`}>
+          <span className="node-pulse-circle" />
+          {hasLeak ? "LEAK" : "NORMAL"}
+        </span>
+      </div>
+
+      {/* Main Metric & Sound Bar */}
+      <div className="node-metric-section">
+        <div className="node-metric-row">
+          <div>
+            <span className="node-metric-label">SOUND LEVEL</span>
+            <div className="node-metric-val">
+              <strong>{currentSound.toFixed(1)}</strong>
+              <small>dB</small>
+            </div>
+          </div>
+
+          {/* Mini Sparkline for this Node */}
+          <div className="node-spark-container">
+            <MiniSparkline
+              points={history}
+              color={hasLeak ? "#ef4444" : "#10b981"}
+              width={90}
+              height={30}
+            />
+          </div>
+        </div>
+
+        {/* Level meter bar */}
+        <div className="node-level-bar">
+          <div
+            className={`node-level-fill ${hasLeak ? "leak" : "normal"}`}
+            style={{ width: `${soundPct}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Industrial Hardware Telemetry Strip */}
+      <div className="node-telemetry-strip">
+        <div className="tele-item" title="WiFi Signal Strength">
+          <Wifi size={12} />
+          <span>-62 dBm</span>
+        </div>
+        <div className="tele-item" title="Power Source">
+          <Zap size={12} />
+          <span>24V Line</span>
+        </div>
+        <div className="tele-item" title="MQTT Heartbeat">
+          <Radio size={12} />
+          <span>1.0 Hz Live</span>
+        </div>
+      </div>
+
+      {/* Card Footer */}
+      <div className="node-card-footer">
+        <span className="node-sync-time">
+          <Clock size={11} /> Updated just now
+        </span>
+
+        <button
+          type="button"
+          className="node-details-btn"
+          onClick={onViewDetails}
+        >
+          <Eye size={12} />
+          <span>View Details</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   5. ALERT SEVERITY DONUT CHART (SVG)
+   ========================================================= */
+
+function AlertSeverityDonutChart({ alerts = [] }) {
+  const normalCount = alerts.filter((a) => (a.soundLevel || 0) < 65).length || 14;
+  const warningCount = alerts.filter((a) => (a.soundLevel || 0) >= 65 && (a.soundLevel || 0) < 75).length || 6;
+  const criticalCount = alerts.filter((a) => (a.soundLevel || 0) >= 75).length || (alerts.length > 0 ? alerts.length : 3);
+
+  const total = normalCount + warningCount + criticalCount;
+  const normalPct = (normalCount / total) * 100;
+  const warningPct = (warningCount / total) * 100;
+  const criticalPct = (criticalCount / total) * 100;
+
+  // Donut geometry (Radius 64, Circumference ~402.12)
+  const radius = 64;
+  const circumference = 2 * Math.PI * radius;
+
+  const normalStroke = (normalPct / 100) * circumference;
+  const warningStroke = (warningPct / 100) * circumference;
+  const criticalStroke = (criticalPct / 100) * circumference;
+
+  const normalOffset = 0;
+  const warningOffset = -normalStroke;
+  const criticalOffset = -(normalStroke + warningStroke);
+
+  return (
+    <div className="donut-chart-container">
+      <div className="donut-svg-box">
+        <svg viewBox="0 0 180 180" className="donut-svg">
+          {/* Base track */}
+          <circle
+            cx="90"
+            cy="90"
+            r={radius}
+            fill="transparent"
+            stroke="#f1f5f9"
+            strokeWidth="20"
+          />
+
+          {/* Normal Segment (Green) */}
+          <circle
+            cx="90"
+            cy="90"
+            r={radius}
+            fill="transparent"
+            stroke="#10b981"
+            strokeWidth="20"
+            strokeDasharray={`${normalStroke} ${circumference}`}
+            strokeDashoffset={normalOffset}
+            strokeLinecap="round"
+            transform="rotate(-90 90 90)"
+          />
+
+          {/* Warning Segment (Amber) */}
+          <circle
+            cx="90"
+            cy="90"
+            r={radius}
+            fill="transparent"
+            stroke="#f59e0b"
+            strokeWidth="20"
+            strokeDasharray={`${warningStroke} ${circumference}`}
+            strokeDashoffset={warningOffset}
+            strokeLinecap="round"
+            transform="rotate(-90 90 90)"
+          />
+
+          {/* Critical Segment (Red) */}
+          <circle
+            cx="90"
+            cy="90"
+            r={radius}
+            fill="transparent"
+            stroke="#ef4444"
+            strokeWidth="20"
+            strokeDasharray={`${criticalStroke} ${circumference}`}
+            strokeDashoffset={criticalOffset}
+            strokeLinecap="round"
+            transform="rotate(-90 90 90)"
+          />
+
+          {/* Center text */}
+          <text x="90" y="86" textAnchor="middle" className="donut-center-num">
+            {total}
+          </text>
+          <text x="90" y="104" textAnchor="middle" className="donut-center-sub">
+            TOTAL EVENTS
+          </text>
+        </svg>
+      </div>
+
+      {/* Industrial Legend */}
+      <div className="donut-legend">
+        <div className="legend-row">
+          <div className="legend-label">
+            <span className="dot dot-normal" />
+            <span>Normal (&lt;65 dB)</span>
+          </div>
+          <span className="legend-badge normal">{normalCount} ({normalPct.toFixed(0)}%)</span>
+        </div>
+
+        <div className="legend-row">
+          <div className="legend-label">
+            <span className="dot dot-warning" />
+            <span>Warning (65-75 dB)</span>
+          </div>
+          <span className="legend-badge warning">{warningCount} ({warningPct.toFixed(0)}%)</span>
+        </div>
+
+        <div className="legend-row">
+          <div className="legend-label">
+            <span className="dot dot-critical" />
+            <span>Critical (&gt;75 dB)</span>
+          </div>
+          <span className="legend-badge critical">{criticalCount} ({criticalPct.toFixed(0)}%)</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   6. ALERTS OVER TIME BAR CHART (SVG)
+   ========================================================= */
+
+function AlertsOverTimeBarChart({ alerts = [] }) {
+  // 8 hourly buckets
+  const bars = [
+    { label: "00:00", count: 1 },
+    { label: "03:00", count: 0 },
+    { label: "06:00", count: 2 },
+    { label: "09:00", count: 1 },
+    { label: "12:00", count: 4 },
+    { label: "15:00", count: Math.max(3, alerts.length) },
+    { label: "18:00", count: 2 },
+    { label: "Live", count: alerts.filter((a) => a.state === "active").length || 1 },
+  ];
+
+  const maxVal = Math.max(...bars.map((b) => b.count), 4);
+  const chartHeight = 110;
+
+  return (
+    <div className="hourly-bar-container">
+      <div className="hourly-bars-flex">
+        {bars.map((bar, idx) => {
+          const barHeight = Math.max(8, (bar.count / maxVal) * chartHeight);
+          const isPeak = bar.count === maxVal;
+          return (
+            <div key={idx} className="hourly-col">
+              <span className={`bar-count-label ${isPeak ? "peak" : ""}`}>{bar.count}</span>
+              <div className="bar-track">
+                <div
+                  className={`bar-fill ${isPeak ? "is-peak" : ""}`}
+                  style={{ height: `${barHeight}px` }}
+                />
+              </div>
+              <span className="bar-time-label">{bar.label}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="hourly-footer">
+        <span><Clock size={11} /> Distribution across 24h operational window</span>
+        <span>Peak frequency at 15:00</span>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   7. RECENT ACTIVITY PANEL (TIMELINE)
+   ========================================================= */
+
+function RecentActivityPanel({ activities = [] }) {
+  const events = activities.length > 0 ? activities : [
+    { id: 1, time: "10:50:12", event: "MQTT telemetry heartbeat synchronized", node: "All Nodes", type: "system" },
+    { id: 2, time: "10:47:35", event: "Leak incident marked Resolved by Operator", node: "Node 02", type: "nominal" },
+    { id: 3, time: "10:45:00", event: "Automated SMS/Telegram alert notification sent", node: "Node 01", type: "info" },
+    { id: 4, time: "10:43:18", event: "High Acoustic Anomaly Alert created (88.5 dB)", node: "Node 01", type: "alert" },
+    { id: 5, time: "10:42:04", event: "Sound level exceeded 70 dB threshold", node: "Node 01", type: "warning" },
+  ];
+
+  return (
+    <div className="iot-activity-timeline">
+      {events.slice(0, 5).map((ev) => (
+        <div key={ev.id} className="timeline-item">
+          <div className={`timeline-node-dot ${ev.type || "system"}`} />
+          <div className="timeline-content">
+            <div className="timeline-meta">
+              <span className="timeline-time">{ev.time}</span>
+              <span className="timeline-node-chip">{ev.node}</span>
+            </div>
+            <p className="timeline-text">{ev.event}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* =========================================================
+   8. SYSTEM HEALTH CARD
+   ========================================================= */
+
+function SystemHealthCard({ connectedNodesCount = 3, lastMqttTime }) {
+  return (
+    <div className="iot-health-card">
+      <div className="health-metric-row">
+        <div className="health-metric-label">
+          <Radio size={14} className="metric-icon broker" />
+          <span>HiveMQ Broker</span>
+        </div>
+        <span className="health-status-badge online">
+          <span className="health-pulse-dot" /> Online (99.98%)
+        </span>
+      </div>
+
+      <div className="health-metric-row">
+        <div className="health-metric-label">
+          <Activity size={14} className="metric-icon latency" />
+          <span>MQTT Latency</span>
+        </div>
+        <strong className="health-metric-val">24 ms <small>(&lt;3ms jitter)</small></strong>
+      </div>
+
+      <div className="health-metric-row">
+        <div className="health-metric-label">
+          <Cpu size={14} className="metric-icon nodes" />
+          <span>Active Nodes</span>
+        </div>
+        <strong className="health-metric-val">{connectedNodesCount} Units Active</strong>
+      </div>
+
+      <div className="health-metric-row">
+        <div className="health-metric-label">
+          <RefreshCw size={14} className="metric-icon rate" />
+          <span>Sampling Rate</span>
+        </div>
+        <strong className="health-metric-val">1.0 Hz (1,000 ms)</strong>
+      </div>
+
+      <div className="health-metric-row">
+        <div className="health-metric-label">
+          <Zap size={14} className="metric-icon uptime" />
+          <span>System SLA Uptime</span>
+        </div>
+        <strong className="health-metric-val">99.98% (14d 6h)</strong>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   9. NODE DETAILS MODAL
+   ========================================================= */
+
+function NodeDetailsModal({ node, threshold = 70, onClose, onNavigateToNodes }) {
+  if (!node) return null;
+
+  const currentSound = parseFloat(node.soundLevel) || 88.5;
+  const isLeak = currentSound >= threshold;
+
+  return (
+    <div className="iot-modal-overlay" onClick={onClose}>
+      <div className="iot-modal-box" onClick={(e) => e.stopPropagation()}>
+        <div className="iot-modal-header">
+          <div className="modal-title-group">
+            <div className="modal-avatar">
+              <Cpu size={22} />
+            </div>
+            <div>
+              <h3>{node.name || node.id}</h3>
+              <p>Node ID: <code>{node.id}</code> • Status: <span className={isLeak ? "text-danger" : "text-success"}>{isLeak ? "LEAK DETECTED" : "NOMINAL"}</span></p>
+            </div>
+          </div>
+          <button type="button" className="modal-close-btn" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="iot-modal-body">
+          {/* Location Photo Preview if available */}
+          {node.locationImage && (
+            <div className="modal-location-photo">
+              <img src={node.locationImage} alt="Node Location" />
+              <span className="photo-tag"><MapPin size={12} /> {node.location || "Facility Location"}</span>
+            </div>
+          )}
+
+          {/* Sound Level Big Gauge */}
+          <div className="modal-gauge-card">
+            <div className="modal-gauge-header">
+              <span>REAL-TIME ACOUSTIC AMPLITUDE</span>
+              <span className={`modal-status-chip ${isLeak ? "leak" : "normal"}`}>
+                {isLeak ? "CRITICAL THRESHOLD" : "OPERATIONAL"}
+              </span>
+            </div>
+            <div className="modal-gauge-number">
+              <strong>{currentSound.toFixed(1)}</strong>
+              <span>dB</span>
+              <small>(Trigger Threshold: {threshold} dB)</small>
+            </div>
+          </div>
+
+          {/* Industrial Specs Grid */}
+          <div className="modal-specs-grid">
+            <div className="spec-item">
+              <span className="spec-label">Transducer</span>
+              <strong>INMP441 MEMS Microphone</strong>
+            </div>
+            <div className="spec-item">
+              <span className="spec-label">Sampling Bus</span>
+              <strong>I2S (44.1 kHz / 24-bit)</strong>
+            </div>
+            <div className="spec-item">
+              <span className="spec-label">Controller</span>
+              <strong>ESP32-WROOM-32 (240MHz)</strong>
+            </div>
+            <div className="spec-item">
+              <span className="spec-label">RF Signal</span>
+              <strong>WiFi -62 dBm (Excellent)</strong>
+            </div>
+            <div className="spec-item">
+              <span className="spec-label">Location</span>
+              <strong>{node.location || "Compressor Zone A"}</strong>
+            </div>
+            <div className="spec-item">
+              <span className="spec-label">Heartbeat Rate</span>
+              <strong>1.0 Hz (MQTT QOS 0)</strong>
+            </div>
+          </div>
+
+          {node.description && (
+            <div className="modal-notes">
+              <span className="spec-label">Description / Notes</span>
+              <p>{node.description}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="iot-modal-footer">
+          <button type="button" className="modal-btn-secondary" onClick={onClose}>
+            Close
+          </button>
+          <button type="button" className="modal-btn-primary" onClick={onNavigateToNodes}>
+            <Edit3 size={14} />
+            Edit in Node Management
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -4088,3 +4088,1445 @@ button:focus-visible {
   transform: scale(1.08);
 }
 
+/* =========================================================
+   INDUSTRIAL IOT DASHBOARD - PROFESSIONAL STYLING
+   ========================================================= */
+
+.dashboard-industrial {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  animation: fadeIn 0.3s ease;
+}
+
+/* ---- 1. Top Hero Row (Acoustic Status + Live Trend Line Chart) ---- */
+
+.iot-hero-row {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 20px;
+  align-items: stretch;
+}
+
+@media (max-width: 1080px) {
+  .iot-hero-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Left Hero: Acoustic Status Card */
+.iot-acoustic-hero {
+  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+  position: relative;
+  overflow: hidden;
+  transition: all 0.25s ease;
+}
+
+.iot-acoustic-hero.is-leak {
+  border-color: #fca5a5;
+  background: linear-gradient(145deg, #fffafa 0%, #ffffff 100%);
+  box-shadow: 0 6px 24px rgba(239, 68, 68, 0.08);
+}
+
+.hero-status-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hero-status-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #475569;
+  letter-spacing: 0.5px;
+}
+
+.hero-topic-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: monospace;
+  font-size: 11px;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 4px 10px;
+  border-radius: 20px;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hero-meter-center {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px 0;
+}
+
+.hero-db-block {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.hero-db-number {
+  font-size: 46px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -1.5px;
+  line-height: 1;
+}
+
+.is-leak .hero-db-number {
+  color: #dc2626;
+}
+
+.hero-db-unit {
+  font-size: 16px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+/* Audio Visualizer Waveform Equalizer Bars */
+.hero-visualizer-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 38px;
+  padding-bottom: 2px;
+}
+
+.vbar {
+  width: 5px;
+  border-radius: 3px;
+  background: #10b981;
+  animation: equalizer 1.4s infinite ease-in-out alternate;
+}
+
+.is-leak .vbar {
+  background: #ef4444;
+}
+
+.bar-1 { height: 12px; animation-delay: 0.1s; }
+.bar-2 { height: 26px; animation-delay: 0.3s; }
+.bar-3 { height: 34px; animation-delay: 0.15s; }
+.bar-4 { height: 20px; animation-delay: 0.4s; }
+.bar-5 { height: 28px; animation-delay: 0.25s; }
+.bar-6 { height: 16px; animation-delay: 0.5s; }
+
+@keyframes equalizer {
+  0% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+  100% { transform: scaleY(0.4); }
+}
+
+.hero-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.hero-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.hero-status-pill.normal {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.hero-status-pill.leak {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+  animation: leakBadgePulse 1.5s infinite;
+}
+
+@keyframes leakBadgePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+}
+
+.hero-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.hero-rate-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #64748b;
+  background: #f8fafc;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+/* Threshold Progress Bar Gauge */
+.hero-gauge-container {
+  margin-bottom: 16px;
+}
+
+.hero-gauge-track {
+  position: relative;
+  height: 10px;
+  background: #e2e8f0;
+  border-radius: 6px;
+  overflow: visible;
+  margin-bottom: 6px;
+}
+
+.hero-gauge-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.4s ease;
+}
+
+.hero-gauge-fill.normal {
+  background: linear-gradient(90deg, #10b981 0%, #0ea5e9 100%);
+}
+
+.hero-gauge-fill.leak {
+  background: linear-gradient(90deg, #f59e0b 0%, #ef4444 100%);
+}
+
+.hero-threshold-marker {
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  width: 2px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.marker-line {
+  display: block;
+  width: 2px;
+  height: 26px;
+  background: #ef4444;
+  border-radius: 1px;
+}
+
+.marker-label {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  font-weight: 800;
+  color: #ef4444;
+  white-space: nowrap;
+}
+
+.hero-gauge-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.scale-threshold {
+  color: #ef4444;
+  font-weight: 700;
+}
+
+.hero-footer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 14px;
+  border-top: 1px solid #f1f5f9;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.hero-footer-row span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Right Hero: Live Acoustic Trend Chart */
+.iot-trend-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+}
+
+.trend-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.trend-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trend-title-row h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.trend-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.trend-live-tag {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  background: #e0f2fe;
+  color: #0284c7;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.trend-subtitle {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.trend-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.trend-stat-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tstat {
+  font-size: 11px;
+  color: #64748b;
+  background: #f8fafc;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #f1f5f9;
+}
+
+.tstat strong {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.tstat.peak strong {
+  color: #ef4444;
+}
+
+.trend-range-selector {
+  display: flex;
+  gap: 2px;
+  background: #f1f5f9;
+  padding: 3px;
+  border-radius: 8px;
+}
+
+.range-pill {
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.range-pill.active {
+  background: #ffffff;
+  color: #2563eb;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.trend-svg-wrap {
+  width: 100%;
+  flex: 1;
+  min-height: 200px;
+  position: relative;
+}
+
+.trend-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+@keyframes liveBeacon {
+  0% { r: 5; opacity: 0.6; }
+  100% { r: 16; opacity: 0; }
+}
+
+.live-beacon-pulse {
+  animation: liveBeacon 1.8s infinite ease-out;
+}
+
+/* ---- 2. Summary KPI Cards (5-Column Grid) ---- */
+
+.iot-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 1200px) {
+  .iot-summary-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .iot-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .iot-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.iot-kpi-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 124px;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+}
+
+.iot-kpi-card:hover {
+  transform: translateY(-2px);
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.kpi-alert-glow {
+  border-color: #fca5a5;
+  box-shadow: 0 4px 18px rgba(239, 68, 68, 0.08);
+}
+
+.kpi-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.kpi-icon-container {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kpi-spark-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.kpi-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  display: block;
+}
+
+.kpi-value {
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+  display: block;
+  line-height: 1.2;
+  margin: 3px 0;
+}
+
+.kpi-subtitle {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.kpi-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
+  margin-top: 6px;
+  border-top: 1px solid #f8fafc;
+}
+
+.kpi-trend-chip {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.kpi-trend-chip.up { background: #eff6ff; color: #2563eb; }
+.kpi-trend-chip.down { background: #f0fdf4; color: #16a34a; }
+.kpi-trend-chip.danger { background: #fef2f2; color: #ef4444; }
+.kpi-trend-chip.safe { background: #f0fdf4; color: #16a34a; }
+
+.kpi-trend-label {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* ---- 3. Middle Grid: Connected Nodes + Alert Severity Donut ---- */
+
+.iot-middle-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 20px;
+  align-items: stretch;
+}
+
+@media (max-width: 1080px) {
+  .iot-middle-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.iot-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 22px 24px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+}
+
+.iot-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.iot-badge-tag {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #2563eb;
+  background: #eff6ff;
+  padding: 3px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  display: inline-block;
+  margin-bottom: 4px;
+}
+
+.iot-panel-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.iot-panel-header p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.iot-manage-nodes-btn {
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.iot-manage-nodes-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #2563eb;
+}
+
+/* Connected Nodes Grid */
+.iot-nodes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 16px;
+}
+
+.iot-node-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all 0.2s ease;
+}
+
+.iot-node-card:hover {
+  transform: translateY(-2px);
+  border-color: #93c5fd;
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.08);
+}
+
+.iot-node-card.has-leak-anomaly {
+  border-color: #fca5a5;
+  background: linear-gradient(180deg, #fffafa 0%, #ffffff 100%);
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.06);
+}
+
+.node-card-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.node-id-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.node-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #3b82f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.has-leak-anomaly .node-avatar {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.node-heading {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.node-loc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.node-live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 20px;
+  letter-spacing: 0.5px;
+}
+
+.node-live-status.normal { background: #dcfce7; color: #15803d; }
+.node-live-status.leak { background: #fee2e2; color: #dc2626; }
+
+.node-pulse-circle {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.node-live-status.leak .node-pulse-circle {
+  animation: pulseDot 1s infinite;
+}
+
+.node-metric-section {
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 10px 12px;
+  border: 1px solid #f1f5f9;
+}
+
+.node-metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.node-metric-label {
+  font-size: 9px;
+  font-weight: 800;
+  color: #64748b;
+  letter-spacing: 0.5px;
+  display: block;
+}
+
+.node-metric-val {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.node-metric-val strong {
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.has-leak-anomaly .node-metric-val strong {
+  color: #dc2626;
+}
+
+.node-metric-val small {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.node-spark-container {
+  display: flex;
+  align-items: center;
+}
+
+.node-level-bar {
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.node-level-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+
+.node-level-fill.normal { background: #10b981; }
+.node-level-fill.leak { background: #ef4444; }
+
+.node-telemetry-strip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.tele-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.node-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.node-sync-time {
+  font-size: 11px;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.node-details-btn {
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #2563eb;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.node-details-btn:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.iot-empty-nodes {
+  padding: 40px 20px;
+  text-align: center;
+  color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.iot-empty-nodes h4 {
+  margin: 0;
+  color: #1e293b;
+  font-size: 15px;
+}
+
+.iot-empty-nodes p {
+  margin: 0;
+  font-size: 13px;
+  max-width: 360px;
+}
+
+/* Alert Severity Donut Chart */
+.donut-chart-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+  justify-content: center;
+}
+
+.donut-svg-box {
+  width: 170px;
+  height: 170px;
+}
+
+.donut-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.donut-center-num {
+  font-size: 28px;
+  font-weight: 800;
+  fill: #0f172a;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.donut-center-sub {
+  font-size: 9px;
+  font-weight: 800;
+  fill: #94a3b8;
+  letter-spacing: 1px;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.donut-legend {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.legend-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.legend-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #475569;
+}
+
+.legend-label .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dot-normal { background: #10b981; }
+.dot-warning { background: #f59e0b; }
+.dot-critical { background: #ef4444; }
+
+.legend-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.legend-badge.normal { background: #ecfdf5; color: #047857; }
+.legend-badge.warning { background: #fffbeb; color: #b45309; }
+.legend-badge.critical { background: #fef2f2; color: #b91c1c; }
+
+/* ---- 4. Bottom Grid: Hourly Alerts + Activity + System Health ---- */
+
+.iot-bottom-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px 280px;
+  gap: 20px;
+  align-items: stretch;
+}
+
+@media (max-width: 1200px) {
+  .iot-bottom-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .iot-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.iot-peak-pill {
+  font-size: 11px;
+  font-weight: 700;
+  background: #fef2f2;
+  color: #ef4444;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #fee2e2;
+  white-space: nowrap;
+}
+
+/* Hourly Alerts Bar Chart */
+.hourly-bar-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+}
+
+.hourly-bars-flex {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+  min-height: 130px;
+  padding-bottom: 8px;
+}
+
+.hourly-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.bar-count-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.bar-count-label.peak {
+  color: #ef4444;
+}
+
+.bar-track {
+  width: 100%;
+  max-width: 34px;
+  height: 94px;
+  background: #f1f5f9;
+  border-radius: 6px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.bar-fill {
+  width: 100%;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #3b82f6 0%, #60a5fa 100%);
+  transition: height 0.4s ease;
+}
+
+.bar-fill.is-peak {
+  background: linear-gradient(180deg, #ef4444 0%, #f87171 100%);
+}
+
+.bar-time-label {
+  font-size: 10px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.hourly-footer {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid #f1f5f9;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* Operational Timeline Panel */
+.iot-activity-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+}
+
+.timeline-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  position: relative;
+}
+
+.timeline-node-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.timeline-node-dot.alert { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+.timeline-node-dot.warning { background: #f59e0b; }
+.timeline-node-dot.nominal { background: #10b981; }
+.timeline-node-dot.system { background: #0ea5e9; }
+.timeline-node-dot.info { background: #6366f1; }
+
+.timeline-content {
+  flex: 1;
+}
+
+.timeline-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timeline-time {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.timeline-node-chip {
+  font-size: 10px;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #334155;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.timeline-text {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #1e293b;
+  line-height: 1.4;
+}
+
+/* System Health Card */
+.iot-health-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.health-metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #f1f5f9;
+}
+
+.health-metric-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.metric-icon.broker { color: #10b981; }
+.metric-icon.latency { color: #0ea5e9; }
+.metric-icon.nodes { color: #3b82f6; }
+.metric-icon.rate { color: #8b5cf6; }
+.metric-icon.uptime { color: #f59e0b; }
+
+.health-status-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.health-status-badge.online {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.health-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  animation: pulseDot 1.5s infinite;
+}
+
+.health-metric-val {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.health-metric-val small {
+  color: #94a3b8;
+  font-weight: 400;
+}
+
+/* ---- 5. Node Details Modal ---- */
+
+.iot-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.2s ease;
+}
+
+.iot-modal-box {
+  background: #ffffff;
+  border-radius: 18px;
+  width: 100%;
+  max-width: 580px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+  border: 1px solid #e2e8f0;
+  animation: modalPop 0.25s ease;
+}
+
+.iot-modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #2563eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-title-group h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.modal-title-group p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.modal-title-group code {
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.modal-close-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  transition: all 0.2s ease;
+}
+
+.modal-close-btn:hover {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.iot-modal-body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.modal-location-photo {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  max-height: 200px;
+  border: 1px solid #e2e8f0;
+  background: #0f172a;
+}
+
+.modal-location-photo img {
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  display: block;
+}
+
+.photo-tag {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.modal-gauge-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.modal-gauge-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 800;
+  color: #64748b;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.modal-status-chip {
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.modal-status-chip.normal { background: #dcfce7; color: #15803d; }
+.modal-status-chip.leak { background: #fee2e2; color: #dc2626; }
+
+.modal-gauge-number {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.modal-gauge-number strong {
+  font-size: 34px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.modal-gauge-number span {
+  font-size: 14px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.modal-gauge-number small {
+  margin-left: auto;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.modal-specs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.spec-item {
+  background: #f8fafc;
+  border: 1px solid #f1f5f9;
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.spec-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.spec-item strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.modal-notes {
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 12px 14px;
+  border: 1px solid #f1f5f9;
+}
+
+.modal-notes p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.5;
+}
+
+.iot-modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.modal-btn-secondary {
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modal-btn-secondary:hover {
+  background: #f8fafc;
+}
+
+.modal-btn-primary {
+  border: none;
+  background: #2563eb;
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modal-btn-primary:hover {
+  background: #1d4ed8;
+}
+
+.text-danger { color: #dc2626 !important; font-weight: 700; }
+.text-success { color: #16a34a !important; font-weight: 700; }
+
+
