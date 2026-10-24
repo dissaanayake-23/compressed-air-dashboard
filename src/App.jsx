@@ -1339,29 +1339,31 @@ function NodesPage({ nodes = [], setNodes, alerts = [] }) {
       lastSeen: editingNode ? editingNode.lastSeen : new Date().toISOString(),
     };
 
+    let backendSaved = false;
     // Try to save to backend
     if (API_BASE) {
       try {
         const method = editingNode ? "PUT" : "POST";
         const url = editingNode
-          ? `${API_BASE}/api/nodes/${editingNode.id}`
+          ? `${API_BASE}/api/nodes/${encodeURIComponent(editingNode.id)}`
           : `${API_BASE}/api/nodes`;
         const resp = await fetch(url, {
           method,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(nodeData),
         });
-        if (!resp.ok) {
+        if (resp.ok) {
+          backendSaved = true;
+        } else {
           const err = await resp.json().catch(() => ({}));
-          setFormError(err.error || "Failed to save node to server.");
-          return;
+          console.warn("Backend save responded with status", resp.status, err);
         }
       } catch (err) {
-        console.warn("Backend save failed, saving locally:", err);
+        console.warn("Backend save network error, saving locally:", err);
       }
     }
 
-    // Update local state
+    // Always update local state & cache so edits are never lost
     setNodes((current) => {
       let updated;
       if (editingNode) {
@@ -1373,11 +1375,15 @@ function NodesPage({ nodes = [], setNodes, alerts = [] }) {
       }
       try {
         localStorage.setItem("cached_nodes", JSON.stringify(updated));
-      } catch {}
+      } catch (e) {
+        console.warn("Failed to persist to localStorage:", e);
+      }
       return updated;
     });
 
-    setSuccessMsg(editingNode ? `Node "${trimmedName}" updated successfully!` : `Node "${trimmedName}" registered successfully!`);
+    const actionText = editingNode ? "updated" : "registered";
+    const statusText = API_BASE && !backendSaved ? `(saved locally)` : `successfully!`;
+    setSuccessMsg(`Node "${trimmedName}" ${actionText} ${statusText}`);
     closeForm();
 
     setTimeout(() => setSuccessMsg(""), 4000);
@@ -1390,7 +1396,7 @@ function NodesPage({ nodes = [], setNodes, alerts = [] }) {
 
     if (API_BASE) {
       try {
-        await fetch(`${API_BASE}/api/nodes/${nodeId}`, { method: "DELETE" });
+        await fetch(`${API_BASE}/api/nodes/${encodeURIComponent(nodeId)}`, { method: "DELETE" });
       } catch (err) {
         console.warn("Backend delete failed:", err);
       }

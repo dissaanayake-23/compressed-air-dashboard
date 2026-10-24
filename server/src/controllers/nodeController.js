@@ -126,9 +126,29 @@ export async function updateNode(req, res) {
 
   try {
     if (isPostgresConnected && pool) {
-      const existing = await pool.query('SELECT * FROM nodes WHERE id = $1', [id]);
+      const existing = await pool.query('SELECT * FROM nodes WHERE LOWER(id) = LOWER($1)', [id]);
+      
       if (existing.rows.length === 0) {
-        return res.status(404).json({ error: 'Node not found' });
+        // Node does not exist in database yet (e.g. streaming from MQTT) - auto-insert (upsert)
+        await pool.query(
+          `INSERT INTO nodes (id, name, status, sound_level, last_seen, location, location_image, description)
+           VALUES ($1, $2, 'normal', 0, NOW(), $3, $4, $5)`,
+          [id, name || id, location || '', locationImage || '', description || '']
+        );
+
+        return res.json({
+          success: true,
+          node: {
+            id,
+            name: name || id,
+            status: 'normal',
+            soundLevel: 0,
+            lastSeen: new Date().toISOString(),
+            location: location || '',
+            locationImage: locationImage || '',
+            description: description || '',
+          },
+        });
       }
 
       const updates = [];
@@ -158,11 +178,11 @@ export async function updateNode(req, res) {
 
       values.push(id);
       await pool.query(
-        `UPDATE nodes SET ${updates.join(', ')} WHERE id = $${paramIdx}`,
+        `UPDATE nodes SET ${updates.join(', ')} WHERE LOWER(id) = LOWER($${paramIdx})`,
         values
       );
 
-      const updated = await pool.query('SELECT * FROM nodes WHERE id = $1', [id]);
+      const updated = await pool.query('SELECT * FROM nodes WHERE LOWER(id) = LOWER($1)', [id]);
       const row = updated.rows[0];
       return res.json({
         success: true,
@@ -180,9 +200,22 @@ export async function updateNode(req, res) {
     }
 
     // In-memory
-    const node = inMemoryStore.nodes.find(n => n.id.toLowerCase() === id.toLowerCase());
+    let node = inMemoryStore.nodes.find(n => n.id.toLowerCase() === id.toLowerCase());
     if (!node) {
-      return res.status(404).json({ error: 'Node not found' });
+      node = {
+        id,
+        name: name || id,
+        status: 'normal',
+        sound_level: 0,
+        soundLevel: 0,
+        last_seen: new Date(),
+        lastSeen: new Date().toISOString(),
+        location: location || '',
+        locationImage: locationImage || '',
+        description: description || '',
+      };
+      inMemoryStore.nodes.push(node);
+      return res.json({ success: true, node });
     }
 
     if (name !== undefined) node.name = name;
