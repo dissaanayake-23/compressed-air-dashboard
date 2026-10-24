@@ -57,8 +57,13 @@ export async function initDb() {
         last_seen TIMESTAMPTZ DEFAULT NOW(),
         created_at TIMESTAMPTZ DEFAULT NOW(),
         location VARCHAR(255) DEFAULT '',
+        location_image TEXT DEFAULT '',
         description TEXT DEFAULT ''
       );
+
+      ALTER TABLE nodes ADD COLUMN IF NOT EXISTS location VARCHAR(255) DEFAULT '';
+      ALTER TABLE nodes ADD COLUMN IF NOT EXISTS location_image TEXT DEFAULT '';
+      ALTER TABLE nodes ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
 
       CREATE TABLE IF NOT EXISTS alerts (
         id VARCHAR(50) PRIMARY KEY,

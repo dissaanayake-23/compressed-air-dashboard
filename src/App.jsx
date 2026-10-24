@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 import "./App.css";
 
@@ -15,6 +15,10 @@ import {
   Edit3,
   MapPin,
   Server,
+  Upload,
+  X,
+  ImageIcon,
+  Eye,
 } from "lucide-react";
 
 function App() {
@@ -1189,15 +1193,88 @@ function NodesPage({ nodes = [], setNodes, alerts = [] }) {
     id: "",
     name: "",
     location: "",
+    locationImage: "",
     description: "",
   });
   const [formError, setFormError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+  const [lightboxImage, setLightboxImage] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef(null);
 
   const API_BASE = import.meta.env.VITE_API_URL || "";
 
+  /* --- Image processing helper --- */
+  function processImageFile(file) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setFormError("Please upload a valid image file (JPEG, PNG, WebP, etc.).");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setFormError("Image must be smaller than 10 MB.");
+      return;
+    }
+    setFormError("");
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new window.Image();
+      img.onload = () => {
+        // Compress to max 800px width to keep size manageable
+        const MAX_W = 800;
+        let w = img.width;
+        let h = img.height;
+        if (w > MAX_W) {
+          h = Math.round((h * MAX_W) / w);
+          w = MAX_W;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        const compressed = canvas.toDataURL("image/jpeg", 0.75);
+        setFormData((prev) => ({ ...prev, locationImage: compressed }));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }
+
+  function handleDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer?.files?.[0];
+    processImageFile(file);
+  }
+
+  function handleFileSelect(e) {
+    const file = e.target.files?.[0];
+    processImageFile(file);
+    // Reset input so re-selecting the same file works
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function removeImage() {
+    setFormData((prev) => ({ ...prev, locationImage: "" }));
+  }
+
   function resetForm() {
-    setFormData({ id: "", name: "", location: "", description: "" });
+    setFormData({ id: "", name: "", location: "", locationImage: "", description: "" });
     setFormError("");
     setEditingNode(null);
   }
@@ -1212,6 +1289,7 @@ function NodesPage({ nodes = [], setNodes, alerts = [] }) {
       id: node.id,
       name: node.name || node.id,
       location: node.location || "",
+      locationImage: node.locationImage || "",
       description: node.description || "",
     });
     setEditingNode(node);
@@ -1254,6 +1332,7 @@ function NodesPage({ nodes = [], setNodes, alerts = [] }) {
       id: trimmedId,
       name: trimmedName,
       location: formData.location.trim(),
+      locationImage: formData.locationImage || "",
       description: formData.description.trim(),
       status: editingNode ? editingNode.status : "normal",
       soundLevel: editingNode ? editingNode.soundLevel : 0,
@@ -1428,6 +1507,61 @@ function NodesPage({ nodes = [], setNodes, alerts = [] }) {
                 />
               </div>
 
+              {/* Location Image Upload */}
+              <div className="nodes-form-group">
+                <label>
+                  <ImageIcon size={14} style={{ marginRight: "6px", verticalAlign: "middle" }} />
+                  Location Photo
+                </label>
+
+                {formData.locationImage ? (
+                  <div className="location-image-preview">
+                    <img
+                      src={formData.locationImage}
+                      alt="Location preview"
+                      onClick={() => setLightboxImage(formData.locationImage)}
+                    />
+                    <div className="location-image-actions">
+                      <button
+                        type="button"
+                        className="location-image-view"
+                        onClick={() => setLightboxImage(formData.locationImage)}
+                      >
+                        <Eye size={14} /> View
+                      </button>
+                      <button
+                        type="button"
+                        className="location-image-remove"
+                        onClick={removeImage}
+                      >
+                        <X size={14} /> Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className={`location-upload-zone ${isDragging ? "dragging" : ""}`}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload size={28} className="upload-icon" />
+                    <p className="upload-primary">
+                      <strong>Click to upload</strong> or drag and drop
+                    </p>
+                    <p className="upload-hint">JPEG, PNG or WebP (max 10 MB)</p>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="upload-hidden-input"
+                      onChange={handleFileSelect}
+                    />
+                  </div>
+                )}
+              </div>
+
               <div className="nodes-form-group">
                 <label htmlFor="node-desc">Description</label>
                 <textarea
@@ -1509,7 +1643,22 @@ function NodesPage({ nodes = [], setNodes, alerts = [] }) {
                   </span>
 
                   <span className="nodes-table-location">
-                    {node.location || "—"}
+                    {node.locationImage ? (
+                      <span className="location-with-image">
+                        <img
+                          src={node.locationImage}
+                          alt="Location"
+                          className="location-thumb"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setLightboxImage(node.locationImage);
+                          }}
+                        />
+                        <span>{node.location || ""}</span>
+                      </span>
+                    ) : (
+                      node.location || "—"
+                    )}
                   </span>
 
                   <span className="nodes-table-lastseen">{lastSeenStr}</span>
@@ -1557,6 +1706,27 @@ function NodesPage({ nodes = [], setNodes, alerts = [] }) {
           </button>
         </div>
       )}
+      {/* Lightbox for viewing full-size location images */}
+      <ImageLightbox src={lightboxImage} onClose={() => setLightboxImage(null)} />
+    </div>
+  );
+}
+
+/* =========================================================
+   LOCATION IMAGE LIGHTBOX
+   ========================================================= */
+
+function ImageLightbox({ src, onClose }) {
+  if (!src) return null;
+
+  return (
+    <div className="lightbox-overlay" onClick={onClose}>
+      <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="lightbox-close" onClick={onClose}>
+          <X size={20} />
+        </button>
+        <img src={src} alt="Location" />
+      </div>
     </div>
   );
 }

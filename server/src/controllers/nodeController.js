@@ -11,6 +11,7 @@ export async function getNodes(req, res) {
         soundLevel: parseFloat(row.sound_level) || 0,
         lastSeen: row.last_seen,
         location: row.location || '',
+        locationImage: row.location_image || '',
         description: row.description || '',
       }));
       return res.json(nodes);
@@ -22,6 +23,9 @@ export async function getNodes(req, res) {
       status: n.status,
       soundLevel: n.sound_level,
       lastSeen: n.last_seen,
+      location: n.location || '',
+      locationImage: n.locationImage || '',
+      description: n.description || '',
     }));
     return res.json(nodes);
   } catch (err) {
@@ -46,6 +50,7 @@ export async function getNodeById(req, res) {
         soundLevel: parseFloat(row.sound_level) || 0,
         lastSeen: row.last_seen,
         location: row.location || '',
+        locationImage: row.location_image || '',
         description: row.description || '',
       });
     }
@@ -62,7 +67,7 @@ export async function getNodeById(req, res) {
 }
 
 export async function createNode(req, res) {
-  const { id, name, location = '', description = '' } = req.body;
+  const { id, name, location = '', locationImage = '', description = '' } = req.body;
 
   if (!id || !name) {
     return res.status(400).json({ error: 'id and name are required' });
@@ -77,14 +82,14 @@ export async function createNode(req, res) {
       }
 
       await pool.query(
-        `INSERT INTO nodes (id, name, status, sound_level, last_seen, location, description)
-         VALUES ($1, $2, 'normal', 0, NOW(), $3, $4)`,
-        [id, name, location, description]
+        `INSERT INTO nodes (id, name, status, sound_level, last_seen, location, location_image, description)
+         VALUES ($1, $2, 'normal', 0, NOW(), $3, $4, $5)`,
+        [id, name, location, locationImage, description]
       );
 
       return res.status(201).json({
         success: true,
-        node: { id, name, status: 'normal', soundLevel: 0, lastSeen: new Date().toISOString(), location, description },
+        node: { id, name, status: 'normal', soundLevel: 0, lastSeen: new Date().toISOString(), location, locationImage, description },
       });
     }
 
@@ -103,6 +108,7 @@ export async function createNode(req, res) {
       last_seen: new Date(),
       lastSeen: new Date().toISOString(),
       location,
+      locationImage,
       description,
     };
     inMemoryStore.nodes.push(newNode);
@@ -116,7 +122,7 @@ export async function createNode(req, res) {
 
 export async function updateNode(req, res) {
   const { id } = req.params;
-  const { name, location, description } = req.body;
+  const { name, location, locationImage, description } = req.body;
 
   try {
     if (isPostgresConnected && pool) {
@@ -136,6 +142,10 @@ export async function updateNode(req, res) {
       if (location !== undefined) {
         updates.push(`location = $${paramIdx++}`);
         values.push(location);
+      }
+      if (locationImage !== undefined) {
+        updates.push(`location_image = $${paramIdx++}`);
+        values.push(locationImage);
       }
       if (description !== undefined) {
         updates.push(`description = $${paramIdx++}`);
@@ -163,6 +173,7 @@ export async function updateNode(req, res) {
           soundLevel: parseFloat(row.sound_level) || 0,
           lastSeen: row.last_seen,
           location: row.location || '',
+          locationImage: row.location_image || '',
           description: row.description || '',
         },
       });
@@ -176,6 +187,7 @@ export async function updateNode(req, res) {
 
     if (name !== undefined) node.name = name;
     if (location !== undefined) node.location = location;
+    if (locationImage !== undefined) node.locationImage = locationImage;
     if (description !== undefined) node.description = description;
 
     return res.json({ success: true, node });
